@@ -1,0 +1,1018 @@
+#!/bin/bash
+
+#  ebuild.sh ->ebuild.sh  //renamed to be unique file begining from E
+#  Script for building CloverEFI source under OS X or Linux
+#  Supported chainloads(compilers) are XCODE*, GCC*, UNIXGCC and CLANG
+#
+#
+#  Created by Jadran Puharic on 1/6/12.
+#  Modified by JrCs on 3/9/13.
+#  Zenith432, STLVNUB, cecekpawon 2016
+#  Micky1979 2016
+
+# Go to the Clover root directory
+cd "$(dirname $0)"
+
+# Global variables
+declare -r SELF="${0##*/}"
+declare -r CLOVERROOT="$PWD"
+declare -r SYSNAME="$(uname)"
+if [[ "$SYSNAME" == Linux ]]; then
+  declare -r NUMBER_OF_CPUS=$(nproc)
+else
+  declare -r NUMBER_OF_CPUS=$(sysctl -n hw.logicalcpu)
+fi
+declare -a EDK2_BUILD_OPTIONS=
+print_option_help_wc=
+have_fmt=
+PLATFORMFILE=
+MODULEFILE=
+TARGETRULE=
+
+# Macro
+M_NOGRUB=0
+M_APPLEHFS=0
+
+# Default values
+export TOOLCHAIN=XCODE5
+export TARGETARCH=X64
+export BUILDTARGET=RELEASE
+export BUILDTHREADS=$(( NUMBER_OF_CPUS + 1 ))
+export WORKSPACE=${WORKSPACE:-}
+export CONF_PATH=${CONF_PATH:-}
+#export NASM_PREFIX=
+
+# if building through Xcode, then TOOLCHAIN_DIR is not defined
+# checking if it is where CloverGrowerPro put it
+if [[ "$SYSNAME" == Linux ]]; then
+  export TOOLCHAIN=GCC53
+  TOOLCHAIN_DIR=${TOOLCHAIN_DIR:-/usr}
+else
+  TOOLCHAIN_DIR=${TOOLCHAIN_DIR:-"$CLOVERROOT"/../../toolchain}
+fi
+if [[ ! -d $TOOLCHAIN_DIR ]]; then
+  TOOLCHAIN_DIR="${PWD}"/../../opt/local
+fi
+export TOOLCHAIN_DIR
+echo "TOOLCHAIN_DIR: $TOOLCHAIN_DIR"
+
+VBIOSPATCHCLOVEREFI=0
+ONLYSATA0PATCH=0
+USE_BIOS_BLOCKIO=0
+USE_LOW_EBDA=1
+CLANG=0
+GENPAGE=0
+
+FORCEREBUILD=0
+NOBOOTFILES=0
+
+declare -r GIT=`which git`
+#declare -r GITDIR=`git status 2> /dev/null`        # unsafe as git repository may exist in parent directory
+declare -r VERSTXT="vers.txt"
+if [[ -x "/usr/bin/sw_vers" ]]; then
+  declare -r OSVER="$(sw_vers -productVersion | sed -e 's/\.0$//g')"
+elif [[ -x "/usr/bin/lsb_release" ]]; then
+  # Linux print the name+version in in two lines, sed serves to made it in one line!
+  # ..otherwise Clover fail because Version.h will have a line with no null terminated char.
+  declare -r OSVER="$(lsb_release -sir | sed -e ':a;N;$!ba;s/\n/ /g')"
+fi
+PATCH_FILE=
+
+# Bash options
+set -e # errexit
+set -u # Blow on unbound variable
+
+## FUNCTIONS ##
+
+function exitTrap() {
+    if [[ -n "$PATCH_FILE" && -n "$WORKSPACE" ]]; then
+        echo -n "Unpatching edk2..."
+        ( cd "$WORKSPACE" && cat "$CLOVERROOT"/Patches_for_EDK2/$PATCH_FILE | eval "$PATCH_CMD -p0 -R" &>/dev/null )
+        if [[ $? -eq 0 ]]; then
+            echo " done"
+        else
+            echo " failed"
+        fi
+    fi
+}
+
+# Check if we need to patch the sources
+checkPatch() {
+  #if [[ -x /usr/bin/git ]]; then
+  #    PATCH_CMD="/usr/bin/git apply --whitespace=nowarn"
+  if [[ -n "${GIT}" ]]; then
+      PATCH_CMD="${GIT} apply --whitespace=nowarn"
+  else
+      PATCH_CMD="/usr/bin/patch"
+  fi
+
+  checkToolchain
+
+  if [[ "$SYSNAME" == Linux ]]; then
+    if [[ ! -x "$TOOLCHAIN_DIR"/bin/gcc ]]; then
+        echo "No clover toolchain found !" >&2
+        echo "Install on your system or define the TOOLCHAIN_DIR variable." >&2
+        exit 1
+    fi
+  else
+    if [[ -n "${XCODE_BUILD:-}" ]]; then
+      #declare -r XCODE_MAJOR_VERSION="$(xcodebuild -version | sed -nE 's/^Xcode ([0-9]).*/\1/p')"
+      XCODE_VERSION="$(echo `$XCODE_BUILD -version` | sed -nE 's/^Xcode ([0-9.]+).*/\1/p')"
+      declare -r XCODE_MAJOR_VERSION="$(echo $XCODE_VERSION | cut -d. -f1)"
+
+      case "$XCODE_MAJOR_VERSION" in
+          5) PATCH_FILE=;;
+      esac
+    fi
+
+#  Ubuntu 16 has a good gcc and there's no need for a cross compilation
+#  ..also will fail because /usr/bin/gcc is a symlink, and anyway we already have
+#  a check some lines above
+
+#  if [[ ! -x "$TOOLCHAIN_DIR"/cross/bin/x86_64-clover-linux-gnu-gcc && \
+#    ! -x "$TOOLCHAIN_DIR"/cross/bin/i686-clover-linux-gnu-gcc ]] && [[ $TOOLCHAIN == GCC* ]] ; then
+#    echo "No clover toolchain found !" >&2
+#    echo "Build it with the buidgcc.sh script or defined the TOOLCHAIN_DIR variable." >&2
+#    exit 1
+#  fi
+  fi
+
+# Linux does not come with nasm installed!
+
+#  if [[ ! -x "$TOOLCHAIN_DIR"/bin/nasm ]]; then
+#      echo "No nasm binary found in toolchain directory !" >&2
+#      if [[ "$SYSNAME" != Linux ]]; then
+#        echo "Build it with the buidnasm.sh script." >&2
+#      fi
+#      exit 1
+#  fi
+
+  if [[ -f "/opt/local/bin/nasm" ]]; then
+    export NASM_PREFIX="/opt/local/bin/"
+  elif [[ -f "${TOOLCHAIN_DIR}/bin/nasm" ]]; then
+    # using $TOOLCHAIN_DIR here should allow Clover source to be
+    # inside any sub folder instead of only in ~/
+    export NASM_PREFIX="${TOOLCHAIN_DIR}/bin/"
+  else
+    export NASM_PREFIX=""
+  fi
+
+  echo "NASM_PREFIX: $NASM_PREFIX"
+
+  #NASM_VER=`nasm -v | awk '/version/ {print $3}'`
+  NASM_VER=`${NASM_PREFIX}nasm -v | sed -nE 's/^.*version.([0-9\.]+).*$/\1/p'`
+
+  echo "NASM_VER: $NASM_VER"
+  if [[ "$SYSNAME" == Darwin ]]; then
+    if ! isNASMGood "${NASM_PREFIX}nasm"; then echo "your nasm is not good to build Clover!" && exit 1; fi
+  fi
+}
+
+print_option_help () {
+  if [[ x$print_option_help_wc = x ]]; then
+      if wc -L  </dev/null > /dev/null 2>&1; then
+          print_option_help_wc=-L
+      elif wc -m  </dev/null > /dev/null 2>&1; then
+          print_option_help_wc=-m
+      else
+          print_option_help_wc=-b
+      fi
+  fi
+  if [[ x$have_fmt = x ]]; then
+      if fmt -w 40  </dev/null > /dev/null 2>&1; then
+          have_fmt=y;
+      else
+          have_fmt=n;
+      fi
+  fi
+  local print_option_help_lead="  $1"
+  local print_option_help_lspace="$(echo "$print_option_help_lead" | wc $print_option_help_wc)"
+  local print_option_help_fill="$((26 - print_option_help_lspace))"
+  printf "%s" "$print_option_help_lead"
+  local print_option_help_nl=
+  if [[ $print_option_help_fill -le 0 ]]; then
+      print_option_help_nl=y
+      echo
+  else
+      print_option_help_i=0;
+      while [[ $print_option_help_i -lt $print_option_help_fill ]]; do
+          printf " "
+          print_option_help_i=$((print_option_help_i+1))
+      done
+      print_option_help_nl=n
+  fi
+  local print_option_help_split=
+  if [[ x$have_fmt = xy ]]; then
+      print_option_help_split="$(echo "$2" | fmt -w 50)"
+  else
+      print_option_help_split="$2"
+  fi
+  if [[ x$print_option_help_nl = xy ]]; then
+      echo "$print_option_help_split" | awk '{ print "                          " $0; }'
+  else
+      echo "$print_option_help_split" | awk 'BEGIN   { n = 0 }
+          { if (n == 1) print "                          " $0; else print $0; n = 1 ; }'
+  fi
+}
+
+# Function to manage PATH
+pathmunge () {
+    if [[ ! $PATH =~ (^|:)$1(:|$) ]]; then
+        if [[ "${2:-}" = "after" ]]; then
+            export PATH=$PATH:$1
+        else
+            export PATH=$1:$PATH
+        fi
+    fi
+}
+
+# Add edk2 build option
+addEdk2BuildOption() {
+    EDK2_BUILD_OPTIONS=("${EDK2_BUILD_OPTIONS[@]}" $@)
+}
+
+# Add edk2 build macro
+addEdk2BuildMacro() {
+  local macro="$1"
+  [[ "$macro" == "NO_GRUB_DRIVERS" ]] && M_NOGRUB=1
+  if [[ "$macro" == "USE_APPLE_HFSPLUS_DRIVER" && "$TARGETARCH" == "X64" ]]; then
+    [[ ! -e "${CLOVERROOT}"/HFSPlus/X64/HFSPlus.efi ]] && return
+    M_APPLEHFS=1
+  fi
+  addEdk2BuildOption "-D" "$macro"
+}
+
+# Check NASM
+restoreIFS() {
+  IFS=$' \t\n';
+}
+
+IsNumericOnly() {
+  if [[ "${1}" =~ ^-?[0-9]+$ ]]; then
+    return 0 # no, contains other or is empty
+  else
+    return 1 # yes is an integer (no matter for bash if there are zeroes at the beginning comparing it as integer)
+  fi
+}
+needNASM() {
+  restoreIFS
+  local nasmPath=""
+  local nasmArray=( $(which -a nasm) )
+  local needInstall=1
+  local good=""
+
+  if [ ${#nasmArray[@]} -ge "1" ]; then
+
+    for i in "${nasmArray[@]}"
+    do
+      echo "found nasm v$(${i} -v | grep 'NASM version' | awk '{print $3}') at $(dirname ${i})"
+    done
+
+    # we have a good nasm?
+    for i in "${nasmArray[@]}"
+    do
+      if isNASMGood "${i}"; then
+        good="${i}"
+        break
+      fi
+    done
+
+    if [[ -x "${good}" ]] ; then
+      # only nasm at index 0 is used!
+      if [[ "${good}" == "${nasmArray[0]}" ]]; then
+        echo "${good} is ok.."
+      else
+        echo "this one is good:"
+        echo "${good}"
+      fi
+    else
+      # no nasm versions suitable for Clover
+      echo "nasm found, but is not good to build Clover.."
+      needInstall=0
+    fi
+  else
+    needInstall=0
+    echo "nasm not found.."
+  fi
+  return $needInstall
+}
+
+isNASMGood() {
+  # nasm should be greater or equal to 2.12.02 to be good building Clover.
+  # There was a bad macho relocation in outmacho.c, fixed by Zenith432
+  # and accepted by nasm devel during 2.12.rcxx (release candidate)
+
+  IFS='.';
+  result=1
+
+  local array=($( "${1}" -v | grep 'NASM version' | awk '{print $3}' ))
+
+  local index0=0; local index1=0; local index2=0
+
+  # we accept rc versions too (with outmacho.c fix):
+  # http://www.nasm.us/pub/nasm/releasebuilds/
+
+  if [ "${#array[@]}" -eq 2 ];then
+    index0="$(echo ${array[0]} | egrep -o '^[^rc]+')"
+    index1="$(echo ${array[1]} | egrep -o '^[^rc]+')"
+  fi
+  if [ "${#array[@]}" -eq 3 ];then
+    index0="$(echo ${array[0]} | egrep -o '^[^rc]+')"
+    index1="$(echo ${array[1]} | egrep -o '^[^rc]+')"
+    index2="$(echo ${array[2]} | egrep -o '^[^rc]+')"
+    fi
+
+  for comp in ${array[@]}
+  do
+    if ! IsNumericOnly $comp; then restoreIFS && echo "invalid nasm version component: \"$comp\"" && return $result;fi
+  done
+
+  case "${#array[@]}" in
+  "2") # two components like "2.12"
+    if [ "${index0}" -ge "3" ]; then result=0; fi # index0 > 3 good!
+    if [ "${index0}" -eq "2" ] && [ "${index1}" -gt "12" ]; then result=0; fi # index0 = 2 and index1 > 12 good!
+  ;;
+  "3") # three components like "2.12.02"
+    if [ "${index0}" -ge "3" ]; then result=0; fi # index 0 > 3 good!
+    if [ "${index0}" -eq "2" ] && [ "${index1}" -gt "12" ]; then result=0; fi # index0 = 2 and index1 > 12 good!
+    if [ "${index0}" -eq "2" ] && [ "${index1}" -eq "12" ] && [ "${index2}" -ge "2" ]; then result=0; fi
+  ;;
+  *) # don' know a version of nasm with 1 component or > 3
+    echo "Unknown nasm version format (${1}), expected 2 or three components.."
+  ;;
+  esac
+  restoreIFS
+  return $result
+}
+
+# Check Xcode toolchain
+checkXcode () {
+    XCODE_BUILD="/usr/bin/xcodebuild"
+    local LOCALBIN="/usr/local/bin"
+    local CLOVERBIN="${CLOVERROOT}/BuildTools/usr/local/bin"
+    if [[ ! -x "${XCODE_BUILD}" ]]; then
+        echo "ERROR: Install Xcode Tools from Apple before using this script." >&2
+        exit 1
+    elif [[ -f "${CLOVERBIN}/mtoc.NEW.zip" ]]; then
+        unzip -qo "${CLOVERBIN}/mtoc.NEW.zip" -d "${CLOVERBIN}"
+        [[ ! -d "${LOCALBIN}" ]] && sudo mkdir -p "${LOCALBIN}"
+        if [[ ! -x "${LOCALBIN}/mtoc" ]]; then
+            echo "Installing mtoc"
+            sudo ln -s "${CLOVERBIN}/mtoc.NEW" "${LOCALBIN}/mtoc"
+        fi
+        if [[ ! -x "${LOCALBIN}/mtoc.NEW" ]]; then
+            echo "Installing mtoc.NEW"
+            sudo ln -s "${CLOVERBIN}/mtoc.NEW" "${LOCALBIN}/mtoc.NEW"
+        fi
+        sudo -k
+    fi
+}
+
+# Print the usage.
+usage() {
+    echo "Script for building CloverEFI sources on Darwin OS X"
+    echo
+    printf "Usage: %s [OPTIONS] [all|fds|genc|genmake|clean|cleanpkg|cleanall|cleanlib|modules|libraries]\n" "$SELF"
+    echo
+    echo "Configuration:"
+    print_option_help "-n THREADNUMBER" "Build the platform using multi-threaded compiler [default is number of CPUs + 1]"
+    print_option_help "-h, --help"    "print this message and exit"
+    print_option_help "-v, --version" "print the version information and exit"
+    echo
+    echo "Toolchain:"
+    print_option_help "-clang"     "use XCode Clang toolchain"
+    print_option_help "-gcc47"     "use GCC 4.7 toolchain"
+    print_option_help "-gcc49"     "use GCC 4.9 toolchain"
+    print_option_help "-gcc53"     "use GCC 5.3 toolchain"
+    print_option_help "-xcode"     "use XCode 3.2 toolchain"
+    print_option_help "-xcode5"     "use XCode 5+ toolchain  [Default]"
+    print_option_help "-t TOOLCHAIN, --tagname=TOOLCHAIN" "force to use a specific toolchain"
+    echo
+    echo "Target:"
+    print_option_help "-ia32"      "build Clover in 32-bit [boot3]"
+    print_option_help "-x64"       "build Clover in 64-bit [boot6] [Default]"
+    print_option_help "-mc, --x64-mcp"   "build Clover in 64-bit [boot7] using BiosBlockIO (compatible with MCP chipset)"
+    print_option_help "-a TARGETARCH, --arch=TARGETARCH" "overrides target.txt's TARGET_ARCH definition"
+    print_option_help "-p PLATFORMFILE, --platform=PLATFORMFILE" "Build the platform specified by the DSC filename argument"
+    print_option_help "-m MODULEFILE, --module=MODULEFILE" "Build only the module specified by the INF filename argument"
+    print_option_help "-b BUILDTARGET, --buildtarget=BUILDTARGET" "using the BUILDTARGET to build the platform"
+    echo
+    echo "Options:"
+    print_option_help "-D MACRO, --define=MACRO" "Macro: \"Name[=Value]\"."
+    print_option_help "--vbios-patch-cloverefi" "activate vbios patch in CloverEFI"
+    print_option_help "--only-sata0" "activate only SATA0 patch"
+    print_option_help "--std-ebda" "ebda offset dont shift to 0x88000"
+    print_option_help "--genpage" "dynamically generate page table under ebda"
+    print_option_help "--no-usb" "disable USB support"
+    print_option_help "--no-lto" "disable Link Time Optimisation"
+    print_option_help "--edk2shell <MinimumShell|FullShell>" "copy edk2 Shell to EFI tools dir"
+    echo
+    echo "build options:"
+    print_option_help "-fr, --force-rebuild" "force rebuild all targets"
+    echo
+    echo "Report bugs to https://sourceforge.net/p/cloverefiboot/discussion/1726372/"
+}
+
+# Manage option argument
+argument () {
+  local opt=$1
+  shift
+
+  if [[ $# -eq 0 ]]; then
+      printf "%s: option \`%s' requires an argument\n" "$0" "$opt"
+      exit 1
+  fi
+
+  echo $1
+}
+
+# Check the command line arguments
+checkCmdlineArguments() {
+    while [[ $# -gt 0 ]]; do
+        local option=$1
+        shift
+        case "$option" in
+            -clang  | --clang)   TOOLCHAIN=XCLANG ; CLANG=1 ;;
+            -llvm   | --llvm)    TOOLCHAIN=LLVM  ; CLANG=1 ;;
+            -xcode5  | --xcode5 )  TOOLCHAIN=XCODE5 ; CLANG=1 ;;
+            -GCC47  | --GCC47)   TOOLCHAIN=GCC47   ;;
+            -gcc47  | --gcc47)   TOOLCHAIN=GCC47   ;;
+            -GCC48  | --GCC48)   TOOLCHAIN=GCC48   ;;
+            -gcc48  | --gcc48)   TOOLCHAIN=GCC48   ;;
+            -GCC49  | --GCC49)   TOOLCHAIN=GCC49   ;;
+            -gcc49  | --gcc49)   TOOLCHAIN=GCC49   ;;
+            -GCC53  | --GCC53)   TOOLCHAIN=GCC53   ;;
+            -gcc53  | --gcc53)   TOOLCHAIN=GCC53   ;;
+            -unixgcc | --gcc)    TOOLCHAIN=UNIXGCC ;;
+            -xcode  | --xcode )  TOOLCHAIN=XCODE32 ;;
+            -ia32 | --ia32)      TARGETARCH=IA32   ;;
+            -x64 | --x64)        TARGETARCH=X64    ;;
+            -mc | --x64-mcp)     TARGETARCH=X64 ; USE_BIOS_BLOCKIO=1 ;;
+            -clean)    TARGETRULE=clean ;;
+            -cleanall) TARGETRULE=cleanall ;;
+            -fr | --force-rebuild) FORCEREBUILD=1 ;;
+            -nb | --no-bootfiles) NOBOOTFILES=1 ;;
+#            -d | -debug | --debug)  BUILDTARGET=DEBUG ;;
+#            -r | -release | --release) BUILDTARGET=RELEASE ;;
+            -a) TARGETARCH=$(argument $option "$@"); shift
+                ;;
+            --arch=*)
+                TARGETARCH=$(echo "$option" | sed 's/--arch=//')
+                ;;
+            -p) PLATFORMFILE=$(argument $option "$@"); shift
+                ;;
+            --platform=*)
+                PLATFORMFILE=$(echo "$option" | sed 's/--platform=//')
+                ;;
+            -m) MODULEFILE=$(argument $option "$@"); shift
+                ;;
+            --module=*)
+                MODULEFILE=$(echo "$option" | sed 's/--module=//')
+                ;;
+            -b) BUILDTARGET=$(argument $option "$@"); shift
+                ;;
+            --buildtarget=*)
+                BUILDTARGET=$(echo "$option" | sed 's/--buildtarget=//')
+                ;;
+            -t) TOOLCHAIN=$(argument $option "$@"); shift
+                ;;
+            --tagname=*)
+                TOOLCHAIN=$(echo "$option" | sed 's/--tagname=//')
+                ;;
+            -D)
+                addEdk2BuildMacro $(argument $option "$@"); shift
+                ;;
+            --define=*)
+                addEdk2BuildMacro $(echo "$option" | sed 's/--define=//')
+                ;;
+            -n)
+                BUILDTHREADS=$(argument $option "$@"); shift
+                ;;
+            --vbios-patch-cloverefi)
+                VBIOSPATCHCLOVEREFI=1
+                ;;
+            --only-sata0)
+                ONLYSATA0PATCH=1
+                ;;
+            --std-ebda)
+                USE_LOW_EBDA=0
+                ;;
+            --genpage)
+                GENPAGE=1
+                ;;
+            --no-usb)
+                addEdk2BuildMacro DISABLE_USB_SUPPORT
+                ;;
+            --no-lto)
+                addEdk2BuildMacro DISABLE_LTO
+                ;;
+            --edk2shell) EDK2SHELL=$(argument $option "$@"); shift
+                ;;
+            -h | -\? | -help | --help)
+                usage && exit 0
+                ;;
+            -v | --version)
+                echo "$SELF v1.0" && exit 0
+                ;;
+            -*)
+                printf "Unrecognized option \`%s'\n" "$option" 1>&2
+                exit 1
+                ;;
+            *)
+               TARGETRULE="$option"
+               ;;
+        esac
+    done
+
+    # Update variables
+    PLATFORMFILE="${PLATFORMFILE:-Clover/Clover.dsc}"
+    if [ ! -z "${MODULEFILE}" ]; then
+        MODULEFILE=" -m Clover/$MODULEFILE"
+    fi
+
+    # Allow custom config path
+    if [[ -f "${CONF_PATH}/target.txt" ]]; then
+      addEdk2BuildOption "--conf=${CONF_PATH%/}"
+    elif [[ -f "${CLOVERROOT}/Conf/target.txt" ]]; then
+      addEdk2BuildOption "--conf=${CLOVERROOT}/Conf"
+    fi
+}
+
+## Check tools for the toolchain
+checkToolchain() {
+    case "$TOOLCHAIN" in
+        XCLANG|XCODE32|XCODE5) checkXcode ;;
+    esac
+}
+
+# Main build script
+MainBuildScript() {
+    checkCmdlineArguments $@
+    #checkToolchain
+    checkPatch
+
+#    echo "NASM_PREFIX: ${NASM_PREFIX}"
+
+    local repoRev="0000"
+    if [[ -d .svn ]]; then
+        repoRev=$(svnversion -n | tr -d [:alpha:])
+    elif [[ -d .git ]]; then
+        repoRev=$(git svn find-rev git-svn | tr -cd [:digit:])
+    fi
+
+    echo -n "${repoRev}" > "${VERSTXT}"
+
+    #
+    # we are building the same rev as before?
+    local SkipAutoGen=0
+    #
+    if [[ -f "$CLOVERROOT"/rEFIt_UEFI/Version.h ]]; then
+        local builtedRev=$(cat "$CLOVERROOT"/rEFIt_UEFI/Version.h  \
+                           | grep '#define FIRMWARE_REVISION L' | awk -v FS="(\"|\")" '{print $2}')
+#    echo "old revision ${builtedRev}" >echo.txt
+#    echo "new revision ${repoRev}" >>echo.txt
+
+        if [ "${repoRev}" = "${builtedRev}" ]; then SkipAutoGen=1; fi
+    fi
+
+    #
+    # Setup workspace if it is not set
+    #
+    if [[ -z "$WORKSPACE" ]]; then
+        echo "Initializing workspace"
+        local EDK2DIR=$(cd "$CLOVERROOT"/.. && echo "$PWD")
+        if [[ ! -x "${EDK2DIR}"/edksetup.sh ]]; then
+            echo "Error: Can't find edksetup.sh script !" >&2
+            exit 1
+        fi
+
+        # This version is for the tools in the BaseTools project.
+        # this assumes svn pulls have the same root dir
+        #  export EDK_TOOLS_PATH=`pwd`/../BaseTools
+        # This version is for the tools source in edk2
+        cd "$EDK2DIR"
+        export EDK_TOOLS_PATH="${PWD}"/BaseTools
+        source ./edksetup.sh BaseTools
+        cd "$CLOVERROOT"
+    else
+        echo "Building from: $WORKSPACE"
+    fi
+
+    # Trying to patch edk2
+    if [[ -n "$PATCH_FILE" ]]; then
+        echo -n "Patching edk2..."
+        ( cd "$WORKSPACE" && cat "$CLOVERROOT"/Patches_for_EDK2/$PATCH_FILE | eval "$PATCH_CMD -p0" &>/dev/null )
+        if [[ $? -eq 0 ]]; then
+            echo " done"
+        else
+            echo " failed"
+        fi
+    fi
+
+    export CLOVER_PKG_DIR="$CLOVERROOT"/CloverPackage/CloverV2
+
+    # Cleaning part of the script if we have told to do it
+    if [[ "$TARGETRULE" == cleanpkg ]]; then
+        if [[ "$SYSNAME" != Linux ]]; then
+            # Make some house cleaning
+            echo "Cleaning CloverUpdater files..."
+            make -C "$CLOVERROOT"/CloverPackage/CloverUpdater clean
+
+            echo "Cleaning CloverPrefpane files..."
+            make -C "$CLOVERROOT"/CloverPackage/CloverPrefpane clean
+        fi
+
+        echo "Cleaning bootsector files..."
+        local BOOTHFS="$CLOVERROOT"/BootHFS
+        DESTDIR="$CLOVER_PKG_DIR"/BootSectors make -C $BOOTHFS clean
+
+        echo
+        # Use subshell to use shopt
+        (
+            echo "Cleaning packaging files..."
+            shopt -s nullglob
+            find  "$CLOVER_PKG_DIR"/Bootloaders/{ia32,x64}/ -mindepth 1 -not -path "**/.svn*" -delete
+            if [[ -d "$CLOVER_PKG_DIR"/EFI/BOOT ]]; then
+                find  "$CLOVER_PKG_DIR"/EFI/BOOT/ -name '*.efi' -mindepth 1 -not -path "**/.svn*" -delete
+                rmdir "$CLOVER_PKG_DIR"/EFI/BOOT &>/dev/null
+            fi
+            local dir
+            for dir in "$CLOVER_PKG_DIR"/EFI/CLOVER/drivers*; do
+                find  "$dir" -mindepth 1 -not -path "**/.svn*" -delete
+                rmdir "$dir" &>/dev/null
+            done
+            find  "$CLOVER_PKG_DIR"/EFI/CLOVER/ -name '*.efi' -maxdepth 1 -not -path "**/.svn*" -delete
+            for dir in "$CLOVER_PKG_DIR"/drivers-Off/drivers*; do
+                find  "$dir" -mindepth 1 -not -path "**/.svn*" -delete
+            done
+        )
+        echo  "Done!"
+        exit $?
+
+    elif [[ "$TARGETRULE" == clean || "$TARGETRULE" == cleanall ]]; then
+        build -p $PLATFORMFILE -a $TARGETARCH -b $BUILDTARGET \
+         -t $TOOLCHAIN -n $BUILDTHREADS $TARGETRULE
+        [[ "$TARGETRULE" == cleanall ]] && make -C $WORKSPACE/BaseTools clean
+        exit $?
+    fi
+
+    # Create edk tools if necessary
+    if  [[ ! -x "$EDK_TOOLS_PATH/Source/C/bin/GenFv" ]]; then
+        echo "Building tools as they are not found"
+        make -C "$WORKSPACE"/BaseTools CC="gcc -Wno-deprecated-declarations"
+    fi
+
+    # Apply options
+    [[ "$USE_BIOS_BLOCKIO" -ne 0 ]]    && addEdk2BuildMacro 'USE_BIOS_BLOCKIO'
+    [[ "$VBIOSPATCHCLOVEREFI" -ne 0 ]] && addEdk2BuildMacro 'ENABLE_VBIOS_PATCH_CLOVEREFI'
+    [[ "$ONLYSATA0PATCH" -ne 0 ]] && addEdk2BuildMacro 'ONLY_SATA_0'
+    [[ "$USE_LOW_EBDA" -ne 0 ]] && addEdk2BuildMacro 'USE_LOW_EBDA'
+    [[ "$CLANG" -ne 0 ]] && addEdk2BuildMacro 'CLANG'
+
+    local cmd="${EDK2_BUILD_OPTIONS[@]}"
+
+    if (( $SkipAutoGen == 1 )) && (( $FORCEREBUILD == 0 )); then
+        cmd="build --skip-autogen $cmd"
+    else
+        cmd="build $cmd"
+    fi
+
+    cmd="$cmd -p $PLATFORMFILE $MODULEFILE -a $TARGETARCH -b $BUILDTARGET"
+    cmd="$cmd -t $TOOLCHAIN -n $BUILDTHREADS $TARGETRULE"
+
+    echo
+    echo "Running edk2 build for Clover$TARGETARCH using the command:"
+    echo "$cmd"
+    echo
+
+    # Build Clover version
+    if (( $SkipAutoGen == 0 )) || (( $FORCEREBUILD == 1 )); then
+      local clover_revision=$(cat "${CLOVERROOT}/${VERSTXT}")
+      local clover_build_date=$(date '+%Y-%m-%d %H:%M:%S')
+      #echo "#define FIRMWARE_VERSION \"2.31\"" > "$CLOVERROOT"/Version.h
+      echo "#define FIRMWARE_BUILDDATE \"${clover_build_date}\"" > "$CLOVERROOT"/Version.h
+      echo "#define FIRMWARE_REVISION L\"${clover_revision}\""   >> "$CLOVERROOT"/Version.h
+      echo "#define REVISION_STR \"Clover revision: ${clover_revision}\"" >> "$CLOVERROOT"/Version.h
+
+      local clover_build_info="Args: "
+      if [[ -n "$@" ]]; then
+        clover_build_info="${clover_build_info} $@"
+      fi
+      
+      clover_build_info="${clover_build_info} | $(echo $cmd | xargs | sed -e "s, -p ${PLATFORMFILE} , ,")"
+
+      if [[ -n "${OSVER:-}" ]]; then
+        clover_build_info="${clover_build_info} | OS: ${OSVER}"
+      fi
+      if [[ -n "${XCODE_VERSION:-}" ]]; then
+        clover_build_info="${clover_build_info} | XCODE: ${XCODE_VERSION}"
+      fi
+      # removing force rebuild related flags, and ensure only one blank space is used as separator
+      clover_build_info=$(echo ${clover_build_info} | sed -e 's/ -fr / /' \
+                         | sed -e 's/ --force-rebuild / /' | sed -e 's/ --skip-autogen / /' \
+                         | sed -e 's/build//' | sed -e 's/Args: | /Args: /' | sed -e 's/  / /')
+
+      echo "#define BUILDINFOS_STR \"${clover_build_info}\"" >> "$CLOVERROOT"/Version.h
+
+      cp "$CLOVERROOT"/Version.h "$CLOVERROOT"/rEFIt_UEFI/
+    fi
+
+    eval "$cmd"
+}
+
+copyBin() {
+  local cpSrc="$1"
+  local cpDest="$2"
+  local cpFile=$(basename "$2")
+  #local cpArch=32
+  local cpDestDIR=$(dirname "$cpDest")
+
+  [[ ! -f  "$cpSrc" || ! -d  "$cpDestDIR" ]] && return
+  [[ -d  "$cpDest" ]] && cpFile=$(basename "$cpSrc")
+  #[[ "$cpFile" == *"-64"* ]] && cpArch=64
+  
+  echo "  -> $cpFile"
+  cp -f "$cpSrc" "$cpDest" 2>/dev/null 
+}
+
+setInitBootMsg(){
+    local byte="35"
+    case "${1}" in
+    *boot2)
+        byte="32"
+    ;;
+    *boot3)
+        byte="33"
+    ;;
+    *boot4)
+        byte="34"
+    ;;
+    *boot5)
+        byte="35"
+    ;;
+    *boot6)
+        byte="36"
+    ;;
+    *boot7)
+        byte="37"
+    ;;
+    *boot7-MCP79)
+        byte="4d"
+    ;;
+    *boot8)
+        byte="38"
+    ;;
+    *boot9)
+        byte="39"
+    ;;
+    *)
+        return;
+    ;;
+    esac
+
+    if [[ -f "${1}" ]]; then
+        echo -e "Changing byte at 0xa9 of $(basename ${1}) to show \x${byte} as init message:"
+        printf "\x${byte}" | dd conv=notrunc of="${1}" bs=1 seek=$((0xa9))
+    fi
+}
+
+# Deploy Clover files for packaging
+MainPostBuildScript() {
+    if [[ -z "$EDK_TOOLS_PATH" ]]; then
+      export BASETOOLS_DIR="$WORKSPACE"/BaseTools/Source/C/bin
+    else
+      export BASETOOLS_DIR="$EDK_TOOLS_PATH"/Source/C/bin
+    fi
+    export BOOTSECTOR_BIN_DIR="$CLOVERROOT"/CloverEFI/BootSector/bin
+    export BUILD_DIR="${WORKSPACE}/Build/Clover/${BUILDTARGET}_${TOOLCHAIN}"
+    export BUILD_DIR_ARCH="${BUILD_DIR}/$TARGETARCH"
+
+    echo Compressing DUETEFIMainFv.FV ...
+    "$BASETOOLS_DIR"/LzmaCompress -e -o "${BUILD_DIR}/FV/DUETEFIMAINFV${TARGETARCH}.z" "${BUILD_DIR}/FV/DUETEFIMAINFV${TARGETARCH}.Fv"
+
+    echo Compressing DxeCore.efi ...
+    "$BASETOOLS_DIR"/LzmaCompress -e -o "${BUILD_DIR}/FV/DxeMain${TARGETARCH}.z" "$BUILD_DIR_ARCH/DxeCore.efi"
+
+    echo Compressing DxeIpl.efi ...
+    "$BASETOOLS_DIR"/LzmaCompress -e -o "${BUILD_DIR}/FV/DxeIpl${TARGETARCH}.z" "$BUILD_DIR_ARCH/DxeIpl.efi"
+
+    echo "Generate Loader Image ..."
+
+    if [[ "${TARGETARCH}" = IA32 ]]; then
+      cloverEFIFile=boot3
+      if (( $NOBOOTFILES == 0 )); then
+        "$BASETOOLS_DIR"/GenFw --rebase 0x10000 -o "$BUILD_DIR_ARCH/EfiLoader.efi" "$BUILD_DIR_ARCH/EfiLoader.efi"
+        "$BASETOOLS_DIR"/EfiLdrImage -o "${BUILD_DIR}"/FV/Efildr32 \
+        "${BUILD_DIR}"/${TARGETARCH}/EfiLoader.efi                \
+        "${BUILD_DIR}"/FV/DxeIpl${TARGETARCH}.z                   \
+        "${BUILD_DIR}"/FV/DxeMain${TARGETARCH}.z                  \
+        "${BUILD_DIR}"/FV/DUETEFIMAINFV${TARGETARCH}.z
+        cat $BOOTSECTOR_BIN_DIR/start32H.com2 $BOOTSECTOR_BIN_DIR/efi32.com3 \
+        "${BUILD_DIR}"/FV/Efildr32 > "${BUILD_DIR}"/FV/boot
+      fi
+      rm -Rf "$CLOVER_PKG_DIR"/EFI/CLOVER/drivers3* 2> /dev/null
+      rm -Rf "$CLOVER_PKG_DIR"/drivers-Off/drivers3* 2> /dev/null
+
+      mkdir -p "$CLOVER_PKG_DIR"/Bootloaders/ia32
+      mkdir -p "$CLOVER_PKG_DIR"/EFI/BOOT
+      mkdir -p "$CLOVER_PKG_DIR"/EFI/CLOVER/drivers32
+      mkdir -p "$CLOVER_PKG_DIR"/EFI/CLOVER/drivers32UEFI
+      mkdir -p "$CLOVER_PKG_DIR"/drivers-Off/drivers32
+      mkdir -p "$CLOVER_PKG_DIR"/drivers-Off/drivers32UEFI
+
+      # CloverEFI
+      copyBin "${BUILD_DIR}"/FV/boot "$CLOVER_PKG_DIR"/Bootloaders/ia32/$cloverEFIFile
+      setInitBootMsg "$CLOVER_PKG_DIR"/Bootloaders/ia32/$cloverEFIFile
+      copyBin "$BUILD_DIR_ARCH"/CLOVER${TARGETARCH}.efi "$CLOVER_PKG_DIR"/EFI/BOOT/BOOTIA32.efi
+      copyBin "$BUILD_DIR_ARCH"/CLOVER${TARGETARCH}.efi "$CLOVER_PKG_DIR"/EFI/CLOVER/
+
+      # Mandatory drivers
+      echo "Copy Mandatory drivers:"
+      copyBin "$BUILD_DIR_ARCH"/FSInject.efi "$CLOVER_PKG_DIR"/EFI/CLOVER/drivers32/FSInject-32.efi
+
+      binArray=( FSInject OsxFatBinaryDrv VBoxHfs )
+      for efi in "${binArray[@]}"
+      do
+        copyBin "$BUILD_DIR_ARCH"/$efi.efi "$CLOVER_PKG_DIR"/EFI/CLOVER/drivers32UEFI/$efi-32.efi
+      done
+
+      # Optional drivers
+      echo "Copy Optional drivers:"
+      binArray=( VBoxIso9600 VBoxExt2 VBoxExt4 )
+      for efi in "${binArray[@]}"
+      do
+        copyBin "$BUILD_DIR_ARCH"/$efi.efi "$CLOVER_PKG_DIR"/drivers-Off/drivers32/$efi-32.efi
+      done
+
+      if [[ $M_NOGRUB -eq 0 ]] && (( $NOBOOTFILES == 0 )); then
+        binArray=( GrubEXFAT GrubISO9660 GrubNTFS GrubUDF )
+        for efi in "${binArray[@]}"
+        do
+          copyBin "$BUILD_DIR_ARCH"/$efi.efi "$CLOVER_PKG_DIR"/drivers-Off/drivers32/$efi-32.efi
+        done
+      fi
+
+      binArray=( Ps2KeyboardDxe Ps2MouseAbsolutePointerDxe Ps2MouseDxe UsbMouseDxe XhciDxe )
+      for efi in "${binArray[@]}"
+      do
+        copyBin "$BUILD_DIR_ARCH"/$efi.efi "$CLOVER_PKG_DIR"/drivers-Off/drivers32/$efi-32.efi
+      done
+
+      # Applications
+      echo "Copy Applications:"
+      copyBin "$BUILD_DIR_ARCH"/bdmesg.efi "$CLOVER_PKG_DIR"/EFI/CLOVER/tools/bdmesg-32.efi
+
+      if [[ "${EDK2SHELL:-}" == "MinimumShell" ]]; then
+        copyBin "${WORKSPACE}"/ShellBinPkg/MinUefiShell/Ia32/Shell.efi "$CLOVER_PKG_DIR"/EFI/CLOVER/tools/Shell32.efi
+      elif [[ "${EDK2SHELL:-}" == "FullShell" ]]; then
+        copyBin "${WORKSPACE}"/ShellBinPkg/UefiShell/Ia32/Shell.efi "$CLOVER_PKG_DIR"/EFI/CLOVER/tools/Shell32.efi
+      fi
+    fi
+
+    if [[ "$TARGETARCH" = X64 ]]; then
+      cloverEFIFile=boot$((6 + USE_BIOS_BLOCKIO))
+     if (( $NOBOOTFILES == 0 )); then
+        "$BASETOOLS_DIR"/GenFw --rebase 0x10000 -o "$BUILD_DIR_ARCH/EfiLoader.efi" "$BUILD_DIR_ARCH/EfiLoader.efi"
+        "$BASETOOLS_DIR"/EfiLdrImage -o "${BUILD_DIR}"/FV/Efildr64 \
+        "$BUILD_DIR_ARCH"/EfiLoader.efi                \
+        "${BUILD_DIR}"/FV/DxeIpl${TARGETARCH}.z        \
+        "${BUILD_DIR}"/FV/DxeMain${TARGETARCH}.z       \
+        "${BUILD_DIR}"/FV/DUETEFIMAINFV${TARGETARCH}.z
+        if [[ "$GENPAGE" -eq 0 && "$USE_LOW_EBDA" -ne 0 ]]; then
+          if [[ "$SYSNAME" == Linux ]]; then
+            local -r EL_SIZE=$(stat -c "%s" "${BUILD_DIR}"/FV/Efildr64)
+          else
+            local -r EL_SIZE=$(stat -f "%z" "${BUILD_DIR}"/FV/Efildr64)
+          fi
+          if (( $((EL_SIZE)) > 417792 )); then
+            echo 'warning: boot file bigger than low-ebda permits, switching to --std-ebda'
+            USE_LOW_EBDA=0
+          fi
+        fi
+        local -ar COM_NAMES=(H H2 H3 H4 H5 H6 H5 H6)           # Note: (H{,2,3,4,5,6,5,6}) works in Linux bash, but not Darwin bash
+        startBlock=Start64${COM_NAMES[$((GENPAGE << 2 | USE_LOW_EBDA << 1 | USE_BIOS_BLOCKIO))]}.com
+        if [[ "$GENPAGE" -ne 0 ]]; then
+          cat $BOOTSECTOR_BIN_DIR/$startBlock $BOOTSECTOR_BIN_DIR/efi64.com3 "${BUILD_DIR}"/FV/Efildr64 > "${BUILD_DIR}"/FV/boot
+        else
+          cat $BOOTSECTOR_BIN_DIR/$startBlock $BOOTSECTOR_BIN_DIR/efi64.com3 "${BUILD_DIR}"/FV/Efildr64 > "${BUILD_DIR}"/FV/Efildr20Pure
+
+          if [[ "$USE_LOW_EBDA" -ne 0 ]]; then
+            "$BASETOOLS_DIR"/GenPage "${BUILD_DIR}"/FV/Efildr20Pure -b 0x88000 -f 0x68000 -o "${BUILD_DIR}"/FV/Efildr20
+          else
+            "$BASETOOLS_DIR"/GenPage "${BUILD_DIR}"/FV/Efildr20Pure -o "${BUILD_DIR}"/FV/Efildr20
+          fi
+          # Create CloverEFI file
+          dd if="${BUILD_DIR}"/FV/Efildr20 of="${BUILD_DIR}"/FV/boot bs=512 skip=1
+        fi
+      fi
+
+      rm -Rf "$CLOVER_PKG_DIR"/EFI/CLOVER/drivers6* 2> /dev/null
+      rm -Rf "$CLOVER_PKG_DIR"/drivers-Off/drivers6* 2> /dev/null
+
+      # Be sure that all needed directories exists
+      mkdir -p "$CLOVER_PKG_DIR"/Bootloaders/x64
+      mkdir -p "$CLOVER_PKG_DIR"/EFI/BOOT
+      mkdir -p "$CLOVER_PKG_DIR"/EFI/CLOVER/drivers64
+      mkdir -p "$CLOVER_PKG_DIR"/EFI/CLOVER/drivers64UEFI
+      mkdir -p "$CLOVER_PKG_DIR"/drivers-Off/drivers64
+      mkdir -p "$CLOVER_PKG_DIR"/drivers-Off/drivers64UEFI
+
+      # Install CloverEFI file
+      echo "Copy CloverEFI:"
+      copyBin "${BUILD_DIR}"/FV/boot "$CLOVER_PKG_DIR"/Bootloaders/x64/$cloverEFIFile
+      setInitBootMsg "$CLOVER_PKG_DIR"/Bootloaders/x64/$cloverEFIFile
+      copyBin "$BUILD_DIR_ARCH"/CLOVER${TARGETARCH}.efi "$CLOVER_PKG_DIR"/EFI/BOOT/BOOTX64.efi
+      copyBin "$BUILD_DIR_ARCH"/CLOVER${TARGETARCH}.efi "$CLOVER_PKG_DIR"/EFI/CLOVER/
+
+      # Mandatory drivers
+      echo "Copy Mandatory drivers:"
+#copyBin "$BUILD_DIR_ARCH"/FSInject.efi "$CLOVER_PKG_DIR"/EFI/CLOVER/drivers64/FSInject-64.efi
+      binArray=( FSInject AppleImageCodec AppleUITheme AppleKeyAggregator FirmwareVolume SMCHelper )
+      for efi in "${binArray[@]}"
+      do
+        copyBin "$BUILD_DIR_ARCH"/$efi.efi "$CLOVER_PKG_DIR"/EFI/CLOVER/drivers64/$efi-64.efi
+      done
+
+
+      binArray=( FSInject OsxFatBinaryDrv AppleImageCodec AppleUITheme AppleKeyAggregator FirmwareVolume SMCHelper DataHubDxe )
+      for efi in "${binArray[@]}"
+      do
+        copyBin "$BUILD_DIR_ARCH"/$efi.efi "$CLOVER_PKG_DIR"/EFI/CLOVER/drivers64UEFI/$efi-64.efi
+      done
+
+      if [[ $M_APPLEHFS -eq 0 ]]; then
+        copyBin "$BUILD_DIR_ARCH"/VBoxHfs.efi "$CLOVER_PKG_DIR"/EFI/CLOVER/drivers64UEFI/VBoxHfs-64.efi
+      else
+        copyBin "${CLOVERROOT}"/HFSPlus/X64/HFSPlus.efi "$CLOVER_PKG_DIR"/EFI/CLOVER/drivers64UEFI/HFSPlus.efi
+      fi
+
+      # Optional drivers
+      echo "Copy Optional drivers:"
+      # drivers64
+      # Ps2KeyboardDxe Ps2MouseAbsolutePointerDxe
+      binArray=( NvmExpressDxe Ps2MouseDxe UsbMouseDxe VBoxExt2 VBoxExt4 VBoxIso9600 XhciDxe UsbKbDxe HashServiceFix)
+      for efi in "${binArray[@]}"
+      do
+        copyBin "$BUILD_DIR_ARCH"/$efi.efi "$CLOVER_PKG_DIR"/drivers-Off/drivers64/$efi-64.efi
+      done
+
+      if [[ $M_NOGRUB -eq 0 ]]; then
+        binArray=( GrubEXFAT GrubISO9660 GrubNTFS GrubUDF )
+        for efi in "${binArray[@]}"
+        do
+          copyBin "$BUILD_DIR_ARCH"/$efi.efi "$CLOVER_PKG_DIR"/drivers-Off/drivers64/$efi-64.efi
+        done
+      fi
+
+      # drivers64UEFI      
+      binArray=( CsmVideoDxe EmuVariableUefi OsxAptioFix2Drv OsxAptioFixDrv OsxLowMemFixDrv PartitionDxe Fat )
+      for efi in "${binArray[@]}"
+      do
+        copyBin "$BUILD_DIR_ARCH"/$efi.efi "$CLOVER_PKG_DIR"/drivers-Off/drivers64UEFI/$efi-64.efi
+      done
+
+      # Applications
+      echo "Copy Applications:"
+      copyBin "$BUILD_DIR_ARCH"/bdmesg.efi "$CLOVER_PKG_DIR"/EFI/CLOVER/tools/
+
+      if [[ "${EDK2SHELL:-}" == "MinimumShell" ]]; then
+        copyBin "${WORKSPACE}"/ShellBinPkg/MinUefiShell/X64/Shell.efi "$CLOVER_PKG_DIR"/EFI/CLOVER/tools/Shell64U.efi
+      elif [[ "${EDK2SHELL:-}" == "FullShell" ]]; then
+        copyBin "${WORKSPACE}"/ShellBinPkg/UefiShell/X64/Shell.efi "$CLOVER_PKG_DIR"/EFI/CLOVER/tools/Shell64U.efi
+      fi
+    fi
+
+    echo "Done!"
+
+    # Build and install Bootsectors
+    echo
+    echo "Generating BootSectors"
+    local BOOTHFS="$CLOVERROOT"/BootHFS
+    DESTDIR="$CLOVER_PKG_DIR"/BootSectors make -C $BOOTHFS
+    echo "Done!"
+}
+
+# BUILD START #
+trap 'exitTrap' EXIT
+
+# Default locale
+export LC_ALL=POSIX
+
+
+# Add toolchain bin directory to the PATH
+if [[ "$SYSNAME" != Linux ]]; then
+  pathmunge "$TOOLCHAIN_DIR/bin"
+fi
+
+MainBuildScript $@
+if [[ -z $MODULEFILE  ]] && (( $NOBOOTFILES == 0 )); then
+    MainPostBuildScript
+fi
+
+# Local Variables:      #
+# mode: ksh             #
+# tab-width: 4          #
+# indent-tabs-mode: nil #
+# End:                  #
+#
+# vi: set expandtab ts=4 sw=4 sts=4: #

@@ -1,0 +1,81 @@
+#!/bin/bash
+#
+# Reset default charset for GNUsed problems...
+export LC_ALL=C
+
+# Workspace = edk2/Clover/CloverPackage
+
+# Go to the script directory to create the package
+cd "$(dirname $0)"
+
+version=v2.4k
+if [[ -d ../.git ]]; then
+  revision=$(git svn info | grep Revision | tr -cd [:digit:])
+else
+  revision=$(svnversion -n | tr -d [:alpha:])
+fi
+
+SRCROOT="${PWD}"
+SYMROOT="${SRCROOT}"/sym
+PKG_BUILD_DIR="${SYMROOT}"/package
+
+echo "${version}"  > version
+echo "${revision}" > revision
+
+# Workspace = edk2/Clover/CloverPackage
+
+cp -f ../BootHFS/boot1f32-install.sh  CloverV2/EFI/CLOVER/doc/boot1f32-install.sh
+
+# Workspace = edk2/Clover/CloverPackage
+# Prepare i386 for building package installer.
+
+if [[ -d "$PKG_BUILD_DIR" && $(stat -f '%u' "$PKG_BUILD_DIR") -eq 0 ]]; then
+    sudo rm -rf sym
+fi
+rm -rf sym
+
+# Create a new sym directory
+mkdir sym
+
+#   Make the translation
+echo ""
+echo "========= Translating Resources ========"
+./package/translate.sh || exit $?
+
+# Check that XCode is install properly
+xcode_path=$(/usr/bin/xcode-select --print-path 2>/dev/null)
+if [[ -n "$xcode_path" ]]; then
+  # Make CloverUpdater
+  make -C "${SRCROOT}"/CloverUpdater || exit $?
+  # Make CloverPrefpane
+  make -C "${SRCROOT}"/CloverPrefpane || exit $?
+  # Make utils
+  make -C "${SRCROOT}"/utils || exit $?
+# temporary use ready-to-use binaries
+#  mkdir -p "${SYMROOT}"/utils
+#  cp -v "${SRCROOT}"/utils/binaries/* "${SYMROOT}"/utils/
+fi
+
+# Start to build installer.
+
+package/buildpkg.sh "$SRCROOT" "sym" "$PKG_BUILD_DIR" || exit $?
+
+(cd sym ; zip Clover_${version}_r${revision}.zip \
+ Clover_${version}_r${revision}.pkg              \
+ Clover_${version}_r${revision}.pkg.md5 )
+
+# Workspace = edk2/Clover/CloverPackage/
+# Remove temp files.
+
+rm -f  version
+rm -f  revision
+
+# Workspace = edk2/Clover/CloverPackage
+# Open the final folder.
+if [ "$1" == "" ]; then
+    ls -la sym
+    open sym
+fi
+# Finish building installer.
+
+exit 0
