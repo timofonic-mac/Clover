@@ -886,7 +886,7 @@ VOID AnyKextPatch(UINT8 *Driver, UINT32 DriverSize, CHAR8 *InfoPlist, UINT32 Inf
     DBG_RT(Entry, "==> DISABLED!\n");
     return;
   }
-//zzzz  
+
   if (Entry->KernelAndKextPatches->KPDebug) {
     ExtractKextBundleIdentifier(InfoPlist);
   }
@@ -1027,7 +1027,7 @@ VOID PatchKext(UINT8 *Driver, UINT32 DriverSize, CHAR8 *InfoPlist, UINT32 InfoPl
       CHAR8 *Name = Entry->KernelAndKextPatches->KextPatches[i].Name;
       BOOLEAN   isBundle = (AsciiStrStr(Name, ".") != NULL);
       if ((Entry->KernelAndKextPatches->KextPatches[i].DataLen > 0) &&
-          isBundle?(AsciiStrCmp(gKextBundleIdentifier, Name) == 0):(AsciiStrStr(InfoPlist, Name) != NULL)) {
+          isBundle?(AsciiStrCmp(gKextBundleIdentifier, Name) == 0):(AsciiStrStr(gKextBundleIdentifier, Name) != NULL)) {
       //    (AsciiStrStr(InfoPlist, Entry->KernelAndKextPatches->KextPatches[i].Name) != NULL)) {
         DBG_RT(Entry, "\n\nPatch kext: %a\n", Entry->KernelAndKextPatches->KextPatches[i].Name);
         AnyKextPatch(Driver, DriverSize, InfoPlist, InfoPlistSize, i, Entry);
@@ -1230,7 +1230,6 @@ VOID PatchPrelinkedKexts(LOADER_ENTRY *Entry)
   
   DictPtr = WholePlist;
   while ((DictPtr = AsciiStrStr(DictPtr, "dict>")) != NULL) {
-    
     if (DictPtr[-1] == '<') {
       // opening dict
       DictLevel++;
@@ -1238,7 +1237,6 @@ VOID PatchPrelinkedKexts(LOADER_ENTRY *Entry)
         // kext start
         InfoPlistStart = DictPtr - 1;
       }
-      
     } else if (DictPtr[-2] == '<' && DictPtr[-1] == '/') {
       
       // closing dict
@@ -1283,9 +1281,7 @@ VOID PatchPrelinkedKexts(LOADER_ENTRY *Entry)
         *InfoPlistEnd = SavedValue;
         //DbgCount++;
       }
-      
       DictLevel--;
-      
     }
     DictPtr += 5;
   }
@@ -1316,15 +1312,11 @@ VOID PatchLoadedKexts(LOADER_ENTRY *Entry)
   
   DTInit(dtRoot);
   
-  if (DTLookupEntry(NULL,"/chosen/memory-map", &MMEntry) == kSuccess)
-  {
-    if (DTCreatePropertyIteratorNoAlloc(MMEntry, PropIter) == kSuccess)
-    {
-      while (DTIterateProperties(PropIter, &PropName) == kSuccess)
-      {
+  if (DTLookupEntry(NULL,"/chosen/memory-map", &MMEntry) == kSuccess) {
+    if (DTCreatePropertyIteratorNoAlloc(MMEntry, PropIter) == kSuccess) {
+      while (DTIterateProperties(PropIter, &PropName) == kSuccess) {
         //DBG(L"Prop: %a\n", PropName);
-        if (AsciiStrStr(PropName,"Driver-"))
-        {
+        if (AsciiStrStr(PropName,"Driver-")) {
           // PropEntry _DeviceTreeBuffer is the value of Driver-XXXXXX property
           PropEntry = (_DeviceTreeBuffer*)(((UINT8*)PropIter->currentProperty) + sizeof(DeviceTreeNodeProperty));
           //if (DbgCount < 3) DBG(L"%a: paddr = %x, length = %x\n", PropName, PropEntry->paddr, PropEntry->length);
@@ -1374,15 +1366,12 @@ VOID KextPatcherStart(LOADER_ENTRY *Entry)
       gBS->Stall(2000000);
     }
     PatchPrelinkedKexts(Entry);
-    
   } else {
-    
     DBG_RT(Entry, "Patching loaded kexts ...\n");
     if (Entry->KernelAndKextPatches->KPDebug) {
       gBS->Stall(2000000);
     }
     PatchLoadedKexts(Entry);
-    
   }
 }
 

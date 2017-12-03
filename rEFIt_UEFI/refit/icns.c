@@ -84,7 +84,8 @@ BUILTIN_ICON BuiltinIconTable[BUILTIN_ICON_COUNT] = {
 };
 
 //#define DEC_BUILTIN_ICON(id, ico) BuiltinIconTable[id].Image = egDecodePNG(ico, sizeof(ico), BuiltinIconTable[id].PixelSize, TRUE)
-#define DEC_BUILTIN_ICON(id, ico) BuiltinIconTable[id].Image = egDecodePNG(&ico[0], SZ_##ico, TRUE)
+//#define DEC_BUILTIN_ICON(id, ico) BuiltinIconTable[id].Image = egDecodePNG(&ico[0], SZ_##ico, TRUE)
+#define DEC_BUILTIN_ICON(id, ico) BuiltinIconTable[id].Image = egDecodePNG(ACCESS_EMB_DATA(ico), ACCESS_EMB_SIZE(ico), TRUE)
 
 CHAR16 * GetIconsExt(IN CHAR16 *Icon, IN CHAR16 *Def)
 {
@@ -177,7 +178,7 @@ EG_IMAGE * BuiltinIcon(IN UINTN Id)
     case BUILTIN_SELECTION_BIG:
       DEC_BUILTIN_ICON(Id, emb_selection_big); break;
   }
-  DBG("Icon %d decoded, pointer %x\n", Id, (UINTN)(BuiltinIconTable[Id].Image));
+//  DBG("Icon %d decoded, pointer %x\n", Id, (UINTN)(BuiltinIconTable[Id].Image));
   
   if (!BuiltinIconTable[Id].Image) {
     TextBuffer = egCreateImage(Size, Size, TRUE);  //new pointer

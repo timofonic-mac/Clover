@@ -202,22 +202,23 @@ CHAR16* ArgOptional[NUM_OPT] = {
   L"arch=i386",       //0
   L"arch=x86_64",     //1
   L"-v ",             //2
-  L"-s ",             //3
-  L"-x ",             //4
-  L"nv_disable=1",    //5
-  L"slide=0",         //6
-  L"darkwake=0",      //7
-  L"-xcpm",           //8
-  L"-gux_no_idle",    //9
-  L"-gux_nosleep",    //10
-  L"-gux_nomsi",      //11
-  L"-gux_defer_usb2", //12
-  L"keepsyms=1",      //13
-  L"debug=0x100",     //14
-  L"kextlog=0xffff",  //15
-  L"-alcoff",         //16
-  L"-shikioff",       //17
-  L"nvda_drv=1"       //18
+  L"-f ",             //3
+  L"-s ",             //4
+  L"-x ",             //5
+  L"nv_disable=1",    //6
+  L"slide=0",         //7
+  L"darkwake=0",      //8
+  L"-xcpm",           //9
+  L"-gux_no_idle",    //10
+  L"-gux_nosleep",    //11
+  L"-gux_nomsi",      //12
+  L"-gux_defer_usb2", //13
+  L"keepsyms=1",      //14
+  L"debug=0x100",     //15
+  L"kextlog=0xffff",  //16
+  L"-alcoff",         //17
+  L"-shikioff",       //18
+  L"nvda_drv=1"       //19
 };
 
 UINTN RunGenericMenu(IN REFIT_MENU_SCREEN *Screen, IN MENU_STYLE_FUNC StyleFunc, IN OUT INTN *DefaultEntryIndex, OUT REFIT_MENU_ENTRY **ChosenEntry);
@@ -398,8 +399,8 @@ VOID FillInputs(BOOLEAN New)
   InputItems[InputItemsCount++].BValue = gSettings.KernelAndKextPatches.KPAppleRTC;
   InputItems[InputItemsCount].ItemType = BoolValue; //48
   InputItems[InputItemsCount++].BValue = gSettings.KernelAndKextPatches.KPKernelPm;
-  InputItems[InputItemsCount].ItemType = BoolValue; //49
-  InputItems[InputItemsCount++].BValue = gSettings.DropMCFG;
+  InputItems[InputItemsCount].ItemType = BoolValue; //49 //not used
+  InputItems[InputItemsCount++].BValue = TRUE; //gSettings.DropMCFG;
 
   InputItems[InputItemsCount].ItemType = Decimal;  //50
   if (New) {
@@ -445,10 +446,10 @@ VOID FillInputs(BOOLEAN New)
   }
   UnicodeSPrint(InputItems[InputItemsCount++].SValue, 64, L"%d", gSettings.HDALayoutId);
   
-      // syscl change here
+  // syscl change here
   InputItems[InputItemsCount].ItemType = BoolValue; //61
   InputItems[InputItemsCount++].BValue = gSettings.KernelAndKextPatches.KPDELLSMBIOS;
-    // end of change
+  // end of change
 
   InputItems[InputItemsCount].ItemType = Hex;  //62
   if (New) {
@@ -673,6 +674,13 @@ VOID FillInputs(BOOLEAN New)
     InputItems[InputItemsCount].SValue = AllocateZeroPool(16);
   }
   UnicodeSPrint(InputItems[InputItemsCount++].SValue, 16, L"%04d", gSettings.IntelMaxValue);
+
+  InputItems[InputItemsCount].ItemType = BoolValue; //113
+  InputItems[InputItemsCount++].BValue = gSettings.AutoMerge;
+  InputItems[InputItemsCount].ItemType = BoolValue; //114
+  InputItems[InputItemsCount++].BValue = gSettings.DeInit;
+  InputItems[InputItemsCount].ItemType = BoolValue; //115
+  InputItems[InputItemsCount++].BValue = gSettings.NoCaches;
 
 
   //menu for drop table
@@ -899,7 +907,7 @@ VOID ApplyInputs(VOID)
   }
   i++; //49
   if (InputItems[i].Valid) {
-    gSettings.DropMCFG = InputItems[i].BValue;
+//    gSettings.DropMCFG = InputItems[i].BValue;
   }
 
   i++; //50
@@ -969,7 +977,7 @@ VOID ApplyInputs(VOID)
   i++; //64
   if (InputItems[i].Valid) {
     gSettings.KernelAndKextPatches.KPDebug = InputItems[i].BValue;
-    gBootChanged = TRUE;
+ //   gBootChanged = TRUE;
   }
 
   // CSR
@@ -1258,7 +1266,18 @@ VOID ApplyInputs(VOID)
   if (InputItems[i].Valid) {
     gSettings.IntelMaxValue = InputItems[i].BValue;
   }
-
+  i++; //113
+  if (InputItems[i].Valid) {
+    gSettings.AutoMerge = InputItems[i].BValue;
+  }
+  i++; //114
+  if (InputItems[i].Valid) {
+    gSettings.DeInit = InputItems[i].BValue;
+  }
+  i++; //115
+  if (InputItems[i].Valid) {
+    gSettings.NoCaches = InputItems[i].BValue;
+  }
 
   if (NeedSave) {
     SaveSettings();
@@ -1303,7 +1322,7 @@ VOID AboutRefit(VOID)
     AddMenuInfo(&AboutMenu, L"  cparm, rehabman, nms42, Sherlocks, Zenith432");
     AddMenuInfo(&AboutMenu, L"  stinga11, TheRacerMaster, solstice, SoThOr, DF");
     AddMenuInfo(&AboutMenu, L"  cecekpawon, Micky1979, Needy, joevt, ErmaC, vit9696");
-    AddMenuInfo(&AboutMenu, L"  ath, savvas, syscl");
+    AddMenuInfo(&AboutMenu, L"  ath, savvas, syscl, goodwin_c");
     AddMenuInfo(&AboutMenu, L"  projectosx.com, applelife.ru, insanelymac.com");
     AddMenuInfo(&AboutMenu, L"");
     AddMenuInfo(&AboutMenu, L"Running on:");
@@ -1350,6 +1369,7 @@ VOID HelpRefit(VOID)
         AddMenuInfo(&HelpMenu, L"F5  - Патченный DSDT сохранить в EFI/CLOVER/ACPI/origin/ (FAT32)");
         AddMenuInfo(&HelpMenu, L"F6  - Сохранить ВидеоБиос в EFI/CLOVER/misc/ (FAT32)");
         AddMenuInfo(&HelpMenu, L"F10 - Снимок экрана в папку EFI/CLOVER/misc/ (FAT32)");
+        AddMenuInfo(&HelpMenu, L"F11 - Reset NVRAM");
         AddMenuInfo(&HelpMenu, L"F12 - Извлечь указанный DVD");
         AddMenuInfo(&HelpMenu, L"Пробел - Подробнее о выбранном пункте");
         AddMenuInfo(&HelpMenu, L"Цифры 1-9 - Быстрый запуск тома по порядку в меню");
@@ -1367,6 +1387,7 @@ VOID HelpRefit(VOID)
         AddMenuInfo(&HelpMenu, L"F5  - Зберегти патчений DSDT в EFI/CLOVER/ACPI/origin/ (FAT32)");
         AddMenuInfo(&HelpMenu, L"F6  - Зберегти VideoBios в EFI/CLOVER/misc/ (FAT32)");
         AddMenuInfo(&HelpMenu, L"F10 - Зберегти знімок екрану в EFI/CLOVER/misc/ (FAT32)");
+        AddMenuInfo(&HelpMenu, L"F11 - Reset NVRAM");
         AddMenuInfo(&HelpMenu, L"F12 - Відкрити обраний диск (DVD)");
         AddMenuInfo(&HelpMenu, L"Пробіл - докладніше про обраний пункт меню");
         AddMenuInfo(&HelpMenu, L"Клавіші 1-9 -  клавіші пунктів меню");
@@ -1384,6 +1405,7 @@ VOID HelpRefit(VOID)
         AddMenuInfo(&HelpMenu, L"F5  - Guardar DSDT parcheado en EFI/CLOVER/ACPI/origin/ (FAT32)");
         AddMenuInfo(&HelpMenu, L"F6  - Guardar VideoBios en EFI/CLOVER/misc/ (FAT32)");
         AddMenuInfo(&HelpMenu, L"F10 - Guardar Captura de pantalla en EFI/CLOVER/misc/ (FAT32)");
+        AddMenuInfo(&HelpMenu, L"F11 - Reset NVRAM");
         AddMenuInfo(&HelpMenu, L"F12 - Expulsar volumen seleccionado (DVD)");
         AddMenuInfo(&HelpMenu, L"Espacio - Detalles acerca selected menu entry");
         AddMenuInfo(&HelpMenu, L"Digitos 1-9 - Atajo a la entrada del menu");
@@ -1402,6 +1424,7 @@ VOID HelpRefit(VOID)
         AddMenuInfo(&HelpMenu, L"F5  - Salva DSDT corrigido em EFI/CLOVER/ACPI/origin/ (somente FAT32)");
         AddMenuInfo(&HelpMenu, L"F6  - Salva VideoBios em EFI/CLOVER/misc/ (somente FAT32)");
         AddMenuInfo(&HelpMenu, L"F10 - Salva screenshot em EFI/CLOVER/misc/ (somente FAT32)");
+        AddMenuInfo(&HelpMenu, L"F11 - Reset NVRAM");
         AddMenuInfo(&HelpMenu, L"F12 - Ejeta o volume selecionado (DVD)");
         AddMenuInfo(&HelpMenu, L"Espaco - Detalhes sobre a opcao do menu selecionada");
         AddMenuInfo(&HelpMenu, L"Tecle 1-9 - Atalho para as entradas do menu");
@@ -1419,6 +1442,7 @@ VOID HelpRefit(VOID)
         AddMenuInfo(&HelpMenu, L"F5  - Salva il patched DSDT in EFI/CLOVER/ACPI/origin/ (FAT32)");
         AddMenuInfo(&HelpMenu, L"F6  - Salva il VideoBios in EFI/CLOVER/misc/ (FAT32)");
         AddMenuInfo(&HelpMenu, L"F10 - Salva screenshot in EFI/CLOVER/misc/ (solo su FAT32)");
+        AddMenuInfo(&HelpMenu, L"F11 - Reset NVRAM");
         AddMenuInfo(&HelpMenu, L"F12 - Espelli il volume selezionato (DVD)");
         AddMenuInfo(&HelpMenu, L"Spazio - Dettagli sul menu selezionato");
         AddMenuInfo(&HelpMenu, L"Digita 1-9 - Abbreviazioni per il menu");
@@ -1436,6 +1460,7 @@ VOID HelpRefit(VOID)
         AddMenuInfo(&HelpMenu, L"F5  - Sichere gepatchtes DSDT in EFI/CLOVER/ACPI/origin/ (FAT32)");
         AddMenuInfo(&HelpMenu, L"F6  - Sichere VideoBios in EFI/CLOVER/misc/ (FAT32)");
         AddMenuInfo(&HelpMenu, L"F10 - Sichere Bildschirmfoto in EFI/CLOVER/misc/ (nur mit FAT32)");
+        AddMenuInfo(&HelpMenu, L"F11 - Reset NVRAM");
         AddMenuInfo(&HelpMenu, L"F12 - Volume auswerfen (DVD)");
         AddMenuInfo(&HelpMenu, L"Leertaste - Details über den gewählten Menue Eintrag");
         AddMenuInfo(&HelpMenu, L"Zahlen 1-9 - Kurzwahl zum Menue Eintrag");
@@ -1453,6 +1478,7 @@ VOID HelpRefit(VOID)
         AddMenuInfo(&HelpMenu, L"F5  - Opslaan gepatchte DSDT in EFI/CLOVER/ACPI/origin/ (FAT32)");
         AddMenuInfo(&HelpMenu, L"F6  - Opslaan VideoBios in EFI/CLOVER/misc/ (FAT32)");
         AddMenuInfo(&HelpMenu, L"F10 - Opslaan schermafdruk in EFI/CLOVER/misc/ (FAT32)");
+        AddMenuInfo(&HelpMenu, L"F11 - Reset NVRAM");
         AddMenuInfo(&HelpMenu, L"F12 - Uitwerpen geselecteerd volume (DVD)");
         AddMenuInfo(&HelpMenu, L"Spatie - Details over geselecteerd menuoptie");
         AddMenuInfo(&HelpMenu, L"Cijfers 1-9 - Snelkoppeling naar menuoptie");
@@ -1470,6 +1496,7 @@ VOID HelpRefit(VOID)
         AddMenuInfo(&HelpMenu, L"F5  - Enregistrer DSDT modifié dans EFI/CLOVER/ACPI/origin/ (FAT32)");
         AddMenuInfo(&HelpMenu, L"F6  - Enregistrer VideoBios dans EFI/CLOVER/misc/ (FAT32)");
         AddMenuInfo(&HelpMenu, L"F10 - Enregistrer la capture d'écran dans EFI/CLOVER/misc/ (FAT32)");
+        AddMenuInfo(&HelpMenu, L"F11 - Reset NVRAM");
         AddMenuInfo(&HelpMenu, L"F12 - Ejecter le volume (DVD)");
         AddMenuInfo(&HelpMenu, L"Space - Détails a propos du menu selectionné");
         AddMenuInfo(&HelpMenu, L"Digits 1-9 - Raccourci vers entrée menu");
@@ -1487,6 +1514,7 @@ VOID HelpRefit(VOID)
         AddMenuInfo(&HelpMenu, L"F5  - Simpan patched DSDT ke EFI/CLOVER/ACPI/origin/ (FAT32)");
         AddMenuInfo(&HelpMenu, L"F6  - Simpan VideoBios ke EFI/CLOVER/misc/ (FAT32)");
         AddMenuInfo(&HelpMenu, L"F10 - Simpan screenshot ke EFI/CLOVER/misc/ (FAT32)");
+        AddMenuInfo(&HelpMenu, L"F11 - Reset NVRAM");
         AddMenuInfo(&HelpMenu, L"F12 - Eject volume (DVD)");
         AddMenuInfo(&HelpMenu, L"Spasi - Detail dari menu yang dipilih");
         AddMenuInfo(&HelpMenu, L"Tombol 1-9 - Shortcut pilihan menu");
@@ -1504,6 +1532,7 @@ VOID HelpRefit(VOID)
         AddMenuInfo(&HelpMenu, L"F5  - Zapis poprawionego DSDT do EFI/CLOVER/ACPI/origin/ (FAT32)");
         AddMenuInfo(&HelpMenu, L"F6  - Zapis BIOSu k. graficznej do EFI/CLOVER/misc/ (FAT32)");
         AddMenuInfo(&HelpMenu, L"F10 - Zapis zrzutu ekranu do EFI/CLOVER/misc/ (tylko FAT32)");
+        AddMenuInfo(&HelpMenu, L"F11 - Reset NVRAM");
         AddMenuInfo(&HelpMenu, L"F12 - Wysuniecie zaznaczonego dysku (tylko dla DVD)");
         AddMenuInfo(&HelpMenu, L"Spacja - Informacje nt. dostepnych opcji dla zaznaczonego dysku");
         AddMenuInfo(&HelpMenu, L"Znaki 1-9 - Skroty opcji dla wybranego dysku");
@@ -1521,6 +1550,7 @@ VOID HelpRefit(VOID)
         AddMenuInfo(&HelpMenu, L"F5  - Spremi patched DSDT into EFI/CLOVER/ACPI/origin/ (FAT32)");
         AddMenuInfo(&HelpMenu, L"F6  - Spremi VideoBios into EFI/CLOVER/misc/ (FAT32)");
         AddMenuInfo(&HelpMenu, L"F10 - Spremi screenshot into EFI/CLOVER/misc/ (FAT32)");
+        AddMenuInfo(&HelpMenu, L"F11 - Reset NVRAM");
         AddMenuInfo(&HelpMenu, L"F12 - Izbaci izabrai (DVD)");
         AddMenuInfo(&HelpMenu, L"Space - Detalji o odabranom sistemu");
         AddMenuInfo(&HelpMenu, L"Brojevi 1 do 9 su prečac do izbora");
@@ -1538,6 +1568,7 @@ VOID HelpRefit(VOID)
         AddMenuInfo(&HelpMenu, L"F5  - Uložit patchnuté DSDT do EFI/CLOVER/ACPI/origin/ (FAT32)");
         AddMenuInfo(&HelpMenu, L"F6  - Uložit VideoBios do EFI/CLOVER/misc/ (FAT32)");
         AddMenuInfo(&HelpMenu, L"F10 - Uložit snímek obrazovky do EFI/CLOVER/misc/ (FAT32)");
+        AddMenuInfo(&HelpMenu, L"F11 - Reset NVRAM");
         AddMenuInfo(&HelpMenu, L"F12 - Vysunout vybranou mechaniku (DVD)");
         AddMenuInfo(&HelpMenu, L"Mezerník - Podrobnosti o vybraném disku");
         AddMenuInfo(&HelpMenu, L"čísla 1-9 - Klávesové zkratky pro disky");
@@ -1555,6 +1586,7 @@ VOID HelpRefit(VOID)
         AddMenuInfo(&HelpMenu, L"F5  - 패치된 DSDT를 EFI/CLOVER/ACPI/origin/에 저장합니다. (FAT32)");
         AddMenuInfo(&HelpMenu, L"F6  - VideoBios를 EFI/CLOVER/misc/에 저장합니다. (FAT32)");
         AddMenuInfo(&HelpMenu, L"F10 - 스크린샷을 EFI/CLOVER/misc/에 저장합니다. (FAT32)");
+        AddMenuInfo(&HelpMenu, L"F11 - NVRAM 초기화");
         AddMenuInfo(&HelpMenu, L"F12 - 선택한 볼륨을 제거합니다. (DVD)");
         AddMenuInfo(&HelpMenu, L"Space - 선택한 메뉴의 상세 설명");
         AddMenuInfo(&HelpMenu, L"Digits 1-9 - 메뉴 단축 번호");
@@ -1571,6 +1603,7 @@ VOID HelpRefit(VOID)
         AddMenuInfo(&HelpMenu, L"F5  - Salvare DSDT modificat in EFI/ACPI/origin/ (FAT32)");
         AddMenuInfo(&HelpMenu, L"F6  - Salvare VideoBios in EFI/misc/ (FAT32)");
         AddMenuInfo(&HelpMenu, L"F10 - Salvare screenshot in EFI/misc/ (FAT32)");
+        AddMenuInfo(&HelpMenu, L"F11 - Reset NVRAM");
         AddMenuInfo(&HelpMenu, L"F12 - Scoatere volum selectat (DVD)");
         AddMenuInfo(&HelpMenu, L"Space - Detalii despre item-ul selectat");
         AddMenuInfo(&HelpMenu, L"Cifre 1-9 - Scurtaturi pentru itemele meniului");
@@ -1589,6 +1622,7 @@ VOID HelpRefit(VOID)
         AddMenuInfo(&HelpMenu, L"F5  - Save patched DSDT into EFI/CLOVER/ACPI/origin/ (FAT32)");
         AddMenuInfo(&HelpMenu, L"F6  - Save VideoBios into EFI/CLOVER/misc/ (FAT32)");
         AddMenuInfo(&HelpMenu, L"F10 - Save screenshot into EFI/CLOVER/misc/ (FAT32)");
+        AddMenuInfo(&HelpMenu, L"F11 - Reset NVRAM");
         AddMenuInfo(&HelpMenu, L"F12 - Eject selected volume (DVD)");
         AddMenuInfo(&HelpMenu, L"Space - Details about selected menu entry");
         AddMenuInfo(&HelpMenu, L"Digits 1-9 - Shortcut to menu entry");
@@ -1684,7 +1718,7 @@ VOID InitSelection(VOID)
       SelectionImages[4] = egLoadImage(ThemeDir, GlobalConfig.SelectionIndicatorName, TRUE);
     }
     if (!SelectionImages[4]) {
-      SelectionImages[4] = egDecodePNG(&emb_selection_indicator[0],  SZ_emb_selection_indicator, TRUE);
+      SelectionImages[4] = egDecodePNG(ACCESS_EMB_DATA(emb_selection_indicator), ACCESS_EMB_SIZE(emb_selection_indicator), TRUE);
       
     }
     SelectionImages[4] = egEnsureImageSize(SelectionImages[4], INDICATOR_SIZE, INDICATOR_SIZE, &MenuBackgroundPixel);
@@ -1705,14 +1739,14 @@ VOID InitSelection(VOID)
   */
 
   // Radio buttons
-  Buttons[0] = egLoadImage(ThemeDir, GetIconsExt(L"radio_button", L"png"), TRUE);
+  Buttons[0] = egLoadImage(ThemeDir, GetIconsExt(L"radio_button", L"png"), TRUE); //memory leak
   Buttons[1] = egLoadImage(ThemeDir, GetIconsExt(L"radio_button_selected", L"png"), TRUE);
   if (!Buttons[0]) {
-    Buttons[0] = egDecodePNG(&emb_radio_button[0],  SZ_emb_radio_button, TRUE);
+    Buttons[0] = egDecodePNG(ACCESS_EMB_DATA(emb_radio_button), ACCESS_EMB_SIZE(emb_radio_button), TRUE);
   }
 //  Buttons[0] = egEnsureImageSize(Buttons[0], TextHeight, TextHeight, &MenuBackgroundPixel);
   if (!Buttons[1]) {
-    Buttons[1] = egDecodePNG(&emb_radio_button_selected[0],  SZ_emb_radio_button_selected, TRUE);
+    Buttons[1] = egDecodePNG(ACCESS_EMB_DATA(emb_radio_button_selected), ACCESS_EMB_SIZE(emb_radio_button_selected), TRUE);
   }
 //  Buttons[1] = egEnsureImageSize(Buttons[1], TextHeight, TextHeight, &MenuBackgroundPixel);
     
@@ -1720,11 +1754,11 @@ VOID InitSelection(VOID)
   Buttons[2] = egLoadImage(ThemeDir, GetIconsExt(L"checkbox", L"png"), TRUE);
   Buttons[3] = egLoadImage(ThemeDir, GetIconsExt(L"checkbox_checked", L"png"), TRUE);
   if (!Buttons[2]) {
-    Buttons[2] = egDecodePNG(&emb_checkbox[0],  SZ_emb_checkbox, TRUE);
+    Buttons[2] = egDecodePNG(ACCESS_EMB_DATA(emb_checkbox), ACCESS_EMB_SIZE(emb_checkbox), TRUE);
   }
 //  Buttons[2] = egEnsureImageSize(Buttons[2], TextHeight, TextHeight, &MenuBackgroundPixel);
   if (!Buttons[3]) {
-    Buttons[3] = egDecodePNG(&emb_checkbox_checked[0],  SZ_emb_checkbox_checked, TRUE);
+    Buttons[3] = egDecodePNG(ACCESS_EMB_DATA(emb_checkbox_checked), ACCESS_EMB_SIZE(emb_checkbox_checked), TRUE);
   }
 //  Buttons[3] = egEnsureImageSize(Buttons[3], TextHeight, TextHeight, &MenuBackgroundPixel);
     
@@ -2476,7 +2510,7 @@ UINTN RunGenericMenu(IN REFIT_MENU_SCREEN *Screen, IN MENU_STYLE_FUNC StyleFunc,
           Status = egSaveFile(NULL, VBIOS_BIN, (UINT8*)(UINTN)0xc0000, 0x20000);
         }
         break;
-			/* just a sample code
+/* just a sample code
       case SCAN_F7:
         Status = egMkDir(SelfRootDir,  L"EFI\\CLOVER\\new_folder");
         DBG("create folder %r\n", Status);
@@ -2497,15 +2531,15 @@ UINTN RunGenericMenu(IN REFIT_MENU_SCREEN *Screen, IN MENU_STYLE_FUNC StyleFunc,
  //this way screen is dirty
         break;
 
-      case SCAN_F8:
-        gSettings.DeInit = TRUE;
-        break;
   */
       case SCAN_F9:
         SetNextScreenMode(1);
         break;
       case SCAN_F10:
         egScreenShot();
+        break;
+      case SCAN_F11:
+        ResetNvram ();
         break;
       case SCAN_F12:
         MenuExit = MENU_EXIT_EJECT;
@@ -3003,28 +3037,28 @@ VOID InitBar(VOID)
   }
 
   if (!BarStartImage) {
-    BarStartImage = egDecodePNG(&emb_scroll_bar_start[0],  SZ_emb_scroll_bar_start, TRUE);
+    BarStartImage = egDecodePNG(ACCESS_EMB_DATA(emb_scroll_bar_start), ACCESS_EMB_SIZE(emb_scroll_bar_start), TRUE);
   }
   if (!BarEndImage) {
-    BarEndImage = egDecodePNG(&emb_scroll_bar_end[0],  SZ_emb_scroll_bar_end, TRUE);
+    BarEndImage = egDecodePNG(ACCESS_EMB_DATA(emb_scroll_bar_end), ACCESS_EMB_SIZE(emb_scroll_bar_end), TRUE);
   }
   if (!ScrollbarBackgroundImage) {
-    ScrollbarBackgroundImage = egDecodePNG(&emb_scroll_bar_fill[0],  SZ_emb_scroll_bar_fill, TRUE);
+    ScrollbarBackgroundImage = egDecodePNG(ACCESS_EMB_DATA(emb_scroll_bar_fill), ACCESS_EMB_SIZE(emb_scroll_bar_fill), TRUE);
   }
   if (!ScrollbarImage) {
-    ScrollbarImage = egDecodePNG(&emb_scroll_scroll_fill[0],  SZ_emb_scroll_scroll_fill, TRUE);
+    ScrollbarImage = egDecodePNG(ACCESS_EMB_DATA(emb_scroll_scroll_fill), ACCESS_EMB_SIZE(emb_scroll_scroll_fill), TRUE);
   }
   if (!ScrollStartImage) {
-    ScrollStartImage = egDecodePNG(&emb_scroll_scroll_start[0],  SZ_emb_scroll_scroll_start, TRUE);
+    ScrollStartImage = egDecodePNG(ACCESS_EMB_DATA(emb_scroll_scroll_start), ACCESS_EMB_SIZE(emb_scroll_scroll_start), TRUE);
   }
   if (!ScrollEndImage) {
-    ScrollEndImage = egDecodePNG(&emb_scroll_scroll_end[0],  SZ_emb_scroll_scroll_end, TRUE);
+    ScrollEndImage = egDecodePNG(ACCESS_EMB_DATA(emb_scroll_scroll_end), ACCESS_EMB_SIZE(emb_scroll_scroll_end), TRUE);
   }
   if (!UpButtonImage) {
-    UpButtonImage = egDecodePNG(&emb_scroll_up_button[0],  SZ_emb_scroll_up_button, TRUE);
+    UpButtonImage = egDecodePNG(ACCESS_EMB_DATA(emb_scroll_up_button), ACCESS_EMB_SIZE(emb_scroll_up_button), TRUE);
   }
   if (!DownButtonImage) {
-    DownButtonImage = egDecodePNG(&emb_scroll_down_button[0],  SZ_emb_scroll_down_button, TRUE);
+    DownButtonImage = egDecodePNG(ACCESS_EMB_DATA(emb_scroll_down_button), ACCESS_EMB_SIZE(emb_scroll_down_button), TRUE);
   }
   UpButton.Width      = ScrollWidth; // 16
   UpButton.Height     = ScrollButtonsHeight; // 20
@@ -4054,6 +4088,9 @@ REFIT_MENU_ENTRY  *SubMenuGraphics()
     if ((gGraphics[i].Vendor == Ati) || (gGraphics[i].Vendor == Intel)) {
       AddMenuItem(SubScreen, 109, "DualLink:", TAG_INPUT, TRUE);
     }
+    if (gGraphics[i].Vendor == Ati) {
+      AddMenuItem(SubScreen, 114, "DeInit:", TAG_INPUT, TRUE);
+    }
 
     AddMenuItem(SubScreen, Ven, "FakeID:", TAG_INPUT, TRUE);
 
@@ -4199,16 +4236,16 @@ REFIT_MENU_ENTRY  *SubMenuKextPatches()
   return Entry;  
 }
 
-REFIT_MENU_ENTRY  *SubMenuKextBlockInjection(CHAR16* uni_sysVer)
+REFIT_MENU_ENTRY  *SubMenuKextBlockInjection(CHAR16* UniSysVer)
 {
   REFIT_MENU_ENTRY     *Entry;
   REFIT_MENU_SCREEN    *SubScreen;
   REFIT_INPUT_DIALOG   *InputBootArgs;
   UINTN i = 0;
   SIDELOAD_KEXT        *Kext = NULL;
-  CHAR8                sysVer[16];
+  CHAR8                sysVer[17]; //RehabMan: logic below uses max index of 16, so buffer must be 17
 
-  UnicodeStrToAsciiStrS(uni_sysVer, sysVer, 16);
+  UnicodeStrToAsciiStrS(UniSysVer, sysVer, 16);
   for (i = 0; i < 16; i++) {
     if (sysVer[i] == '\0') {
       sysVer[i+0] = '-';
@@ -4221,9 +4258,9 @@ REFIT_MENU_ENTRY  *SubMenuKextBlockInjection(CHAR16* uni_sysVer)
   NewEntry(&Entry, &SubScreen, ActionEnter, SCREEN_KEXT_INJECT, sysVer);
   AddMenuInfoLine(SubScreen, PoolPrint(L"Choose/check kext to disable:"));
   while (Kext) {
-    if (StrStr(Kext->MatchOS, uni_sysVer) != NULL) {
+    if (StrStr(Kext->MatchOS, UniSysVer) != NULL) {
       InputBootArgs = AllocateZeroPool(sizeof(REFIT_INPUT_DIALOG));
-      InputBootArgs->Entry.Title = PoolPrint(L"%s", Kext->FileName);
+      InputBootArgs->Entry.Title = PoolPrint(L"%s, v.%s", Kext->FileName, Kext->Version);
       InputBootArgs->Entry.Tag = TAG_INPUT;
       InputBootArgs->Entry.Row = 0xFFFF; //cursor
       InputBootArgs->Item = &(Kext->MenuItem);
@@ -4234,7 +4271,7 @@ REFIT_MENU_ENTRY  *SubMenuKextBlockInjection(CHAR16* uni_sysVer)
       SIDELOAD_KEXT *plugInKext = Kext->PlugInList;
       while (plugInKext) {
         InputBootArgs = AllocateZeroPool(sizeof(REFIT_INPUT_DIALOG));
-        InputBootArgs->Entry.Title = PoolPrint(L"  |-- %s", plugInKext->FileName);
+        InputBootArgs->Entry.Title = PoolPrint(L"  |-- %s, v.%s", plugInKext->FileName, plugInKext->Version);
         InputBootArgs->Entry.Tag = TAG_INPUT;
         InputBootArgs->Entry.Row = 0xFFFF; //cursor
         InputBootArgs->Item = &(plugInKext->MenuItem);
@@ -4258,10 +4295,10 @@ LOADER_ENTRY *SubMenuKextInjectMgmt(LOADER_ENTRY *Entry)
   CHAR16             *kextDir = NULL;
   UINTN              i;
   CHAR8              ShortOSVersion[8];
-  CHAR16            *uni_sysVer = NULL;
+  CHAR16            *UniSysVer = NULL;
   CHAR8             *ChosenOS =Entry->OSVersion;
 
-  NewEntry((REFIT_MENU_ENTRY**)&SubEntry, &SubScreen, ActionEnter, SCREEN_SYSTEM, "Kext Inject Management->");
+  NewEntry((REFIT_MENU_ENTRY**)&SubEntry, &SubScreen, ActionEnter, SCREEN_SYSTEM, "Block injected kexts->");
   SubEntry->Flags = Entry->Flags;
   if (ChosenOS) {
 //    DBG("chosen os %a\n", ChosenOS);
@@ -4276,18 +4313,24 @@ LOADER_ENTRY *SubMenuKextInjectMgmt(LOADER_ENTRY *Entry)
         break;
       }
     }
-    uni_sysVer = PoolPrint(L"%a", ShortOSVersion);
+    UniSysVer = PoolPrint(L"%a", ShortOSVersion);
 
-    AddMenuInfoLine(SubScreen, PoolPrint(L"Manage kext inject for target version of macOS: %a", ShortOSVersion));
-    if ((kextDir = GetOSVersionKextsDir(ShortOSVersion))) {
-      AddMenuEntry(SubScreen, SubMenuKextBlockInjection(uni_sysVer));
+    AddMenuInfoLine(SubScreen, PoolPrint(L"Block injected kexts for target version of macOS: %a", ShortOSVersion));
+    if ((kextDir = GetOSVersionKextsDir(ShortOSVersion)) != NULL) {
+      AddMenuEntry(SubScreen, SubMenuKextBlockInjection(UniSysVer));
       FreePool(kextDir);
     }
-    if ((kextDir = GetOtherKextsDir())) {
+    if ((kextDir = GetOtherKextsDir()) != NULL) {
       AddMenuEntry(SubScreen, SubMenuKextBlockInjection(L"Other"));
       FreePool(kextDir);
     }
-    FreePool(uni_sysVer);
+    FreePool(UniSysVer);
+  } else {
+    AddMenuInfoLine(SubScreen, PoolPrint(L"Block injected kexts for target version of macOS: %a", ChosenOS));
+    if ((kextDir = GetOtherKextsDir()) != NULL) {
+      AddMenuEntry(SubScreen, SubMenuKextBlockInjection(L"Other"));
+      FreePool(kextDir);
+    }
   }
   AddMenuEntry(SubScreen, &MenuEntryReturn);
   return SubEntry;
@@ -4368,8 +4411,9 @@ REFIT_MENU_ENTRY  *SubMenuBinaries()
   AddMenuEntry(SubScreen, SubMenuKernelPatches());
   AddMenuInfo(SubScreen, L"----------------------");
   AddMenuItem(SubScreen, 46,  "AppleIntelCPUPM Patch", TAG_INPUT, FALSE);
-  AddMenuItem(SubScreen, 47,  "AppleRTC Patch", TAG_INPUT, FALSE);  
+  AddMenuItem(SubScreen, 47,  "AppleRTC Patch", TAG_INPUT, FALSE);
   AddMenuItem(SubScreen, 61,  "Dell SMBIOS Patch", TAG_INPUT, FALSE);
+//  AddMenuItem(SubScreen, 115, "No Caches", TAG_INPUT, FALSE);
 //  AddMenuItem(SubScreen, 44,  "Kext patching allowed", TAG_INPUT, FALSE);
   AddMenuEntry(SubScreen, SubMenuKextPatches());
   AddMenuInfo(SubScreen, L"----------------------");
@@ -4416,6 +4460,7 @@ REFIT_MENU_ENTRY  *SubMenuDropTables()
   }
 
   AddMenuItem(SubScreen, 4, "Drop all OEM SSDT", TAG_INPUT, FALSE);
+  AddMenuItem(SubScreen, 113, "Automatic smart merge", TAG_INPUT, FALSE);
 
   //AddMenuInfoLine(SubScreen, L"PATCHED AML:");
   if (ACPIPatchedAML) {
@@ -4540,6 +4585,7 @@ REFIT_MENU_ENTRY  *SubMenuDsdtFix()
   AddMenuCheck(SubScreen, "Add HDMI",     FIX_HDMI, 67);
   AddMenuCheck(SubScreen, "Fix Regions",  FIX_REGIONS, 67);
   AddMenuCheck(SubScreen, "Fix Headers",  FIX_HEADERS, 67);
+  AddMenuCheck(SubScreen, "Fix Mutex",    FIX_MUTEX, 67);
 
   
   AddMenuEntry(SubScreen, &MenuEntryReturn);
@@ -4622,7 +4668,8 @@ REFIT_MENU_ENTRY  *SubMenuCustomDevices() //yyyy
       InputBootArgs->Entry.Title = PoolPrint(L"  key: %a", Prop->Key);
       InputBootArgs->Entry.Tag = TAG_INPUT;
       InputBootArgs->Entry.Row = 0xFFFF; //cursor
-      InputBootArgs->Item = ADDRESS_OF(DEV_PROPERTY, Prop, INPUT_ITEM, MenuItem);
+ //     InputBootArgs->Item = ADDRESS_OF(DEV_PROPERTY, Prop, INPUT_ITEM, MenuItem);
+      InputBootArgs->Item = &Prop->MenuItem;
       InputBootArgs->Entry.AtClick = ActionEnter;
       InputBootArgs->Entry.AtRightClick = ActionDetails;
       AddMenuEntry(SubScreen, (REFIT_MENU_ENTRY*)InputBootArgs);
@@ -4906,7 +4953,7 @@ VOID  OptionsMenu(OUT REFIT_MENU_ENTRY **ChosenEntry, IN CHAR8 *LastChosenOS)
     //    MenuExit = RunMenu(&OptionMenu, ChosenEntry);
     if (MenuExit == MENU_EXIT_ESCAPE || (*ChosenEntry)->Tag == TAG_RETURN)
       break;
-    if (MenuExit == MENU_EXIT_ENTER) {
+    if (MenuExit == MENU_EXIT_ENTER || MenuExit == MENU_EXIT_DETAILS) {
       //enter input dialog or subscreen
       if ((*ChosenEntry)->SubScreen != NULL) {
         SubMenuExit = 0;
@@ -4917,7 +4964,7 @@ VOID  OptionsMenu(OUT REFIT_MENU_ENTRY **ChosenEntry, IN CHAR8 *LastChosenOS)
             ModifyTitles(*ChosenEntry);
             break;
           }
-          if (SubMenuExit == MENU_EXIT_ENTER) {
+          if (SubMenuExit == MENU_EXIT_ENTER || MenuExit == MENU_EXIT_DETAILS) {
             if (TmpChosenEntry->SubScreen != NULL) {
               NextMenuExit = 0;
               while (!NextMenuExit) {
@@ -4927,7 +4974,7 @@ VOID  OptionsMenu(OUT REFIT_MENU_ENTRY **ChosenEntry, IN CHAR8 *LastChosenOS)
                   ModifyTitles(TmpChosenEntry);
                   break;
                 }
-                if (NextMenuExit == MENU_EXIT_ENTER) {
+                if (NextMenuExit == MENU_EXIT_ENTER || MenuExit == MENU_EXIT_DETAILS) {
                   // enter input dialog
                   NextMenuExit = 0;
                   ApplyInputs();
@@ -5064,6 +5111,7 @@ UINTN RunMainMenu(IN REFIT_MENU_SCREEN *Screen, IN INTN DefaultSelection, OUT RE
 
       if (TmpArgs) {
         FreePool(TmpArgs);
+        TmpArgs = NULL;
       }      
       SubMenuExit = 0;
       while (!SubMenuExit) {
@@ -5072,15 +5120,16 @@ UINTN RunMainMenu(IN REFIT_MENU_SCREEN *Screen, IN INTN DefaultSelection, OUT RE
         DecodeOptions((LOADER_ENTRY*)MainChosenEntry);
 //        DBG("get OptionsBits = 0x%x\n", gSettings.OptionsBits);
 //        DBG(" TempChosenEntry FlagsBits = 0x%x\n", ((LOADER_ENTRY*)TempChosenEntry)->Flags);
-        if (SubMenuExit == MENU_EXIT_ESCAPE) {
-          SubMenuExit = 0;
+        if (SubMenuExit == MENU_EXIT_ESCAPE || TempChosenEntry->Tag == TAG_RETURN) {
+          SubMenuExit = MENU_EXIT_ENTER;
+          MenuExit = 0;
+          break;
         }
         if (MainChosenEntry->Tag == TAG_CLOVER) {
           ((LOADER_ENTRY*)MainChosenEntry)->LoadOptions = EfiStrDuplicate(((LOADER_ENTRY*)TempChosenEntry)->LoadOptions);
         }
         //       DBG(" exit menu with LoadOptions: %s\n", ((LOADER_ENTRY*)MainChosenEntry)->LoadOptions);
-        if ((SubMenuExit == MENU_EXIT_ENTER) &&
-            (TempChosenEntry->Tag != TAG_RETURN)) {
+        if (SubMenuExit == MENU_EXIT_ENTER) {
           ((LOADER_ENTRY*)MainChosenEntry)->Flags = ((LOADER_ENTRY*)TempChosenEntry)->Flags;
 //           DBG(" get MainChosenEntry FlagsBits = 0x%x\n", ((LOADER_ENTRY*)MainChosenEntry)->Flags);
         }
@@ -5092,38 +5141,33 @@ UINTN RunMainMenu(IN REFIT_MENU_SCREEN *Screen, IN INTN DefaultSelection, OUT RE
           }
           DBG(" boot with args: %a\n", gSettings.BootArgs);
         }
-        if (/*MenuExit == MENU_EXIT_ESCAPE ||*/ TempChosenEntry->Tag == TAG_RETURN) {
-          SubMenuExit = MENU_EXIT_ENTER;
-          MenuExit = 0;
-        }
         //---- Details submenu (kexts disabling etc)
-        if (SubMenuExit == MENU_EXIT_ENTER) {
+        if (SubMenuExit == MENU_EXIT_ENTER || MenuExit == MENU_EXIT_DETAILS) {
           if (TempChosenEntry->SubScreen != NULL) {
             UINTN NextMenuExit = 0;
             INTN NextEntryIndex = -1;
             while (!NextMenuExit) {
               NextMenuExit = RunGenericMenu(TempChosenEntry->SubScreen, Style, &NextEntryIndex, &NextChosenEntry);
-              if (NextMenuExit == MENU_EXIT_ESCAPE || NextChosenEntry->Tag == TAG_RETURN){
+              if (NextMenuExit == MENU_EXIT_ESCAPE || NextChosenEntry->Tag == TAG_RETURN) {
                 SubMenuExit = 0;
+                NextMenuExit = MENU_EXIT_ENTER;
                 break;
               }
  //             DBG(" get NextChosenEntry FlagsBits = 0x%x\n", ((LOADER_ENTRY*)NextChosenEntry)->Flags);
               //---- Details submenu (kexts disabling etc) second level
-              if (NextMenuExit == MENU_EXIT_ENTER) {
+              if (NextMenuExit == MENU_EXIT_ENTER || MenuExit == MENU_EXIT_DETAILS) {
                 if (NextChosenEntry->SubScreen != NULL) {
                   UINTN DeepMenuExit = 0;
                   INTN DeepEntryIndex = -1;
                   REFIT_MENU_ENTRY    *DeepChosenEntry  = NULL;
                   while (!DeepMenuExit) {
                     DeepMenuExit = RunGenericMenu(NextChosenEntry->SubScreen, Style, &DeepEntryIndex, &DeepChosenEntry);
-                    if (DeepMenuExit == MENU_EXIT_ESCAPE || DeepChosenEntry->Tag == TAG_RETURN){
+                    if (DeepMenuExit == MENU_EXIT_ESCAPE || DeepChosenEntry->Tag == TAG_RETURN) {
+                      DeepMenuExit = MENU_EXIT_ENTER;
                       NextMenuExit = 0;
                       break;
                     }
  //                   DBG(" get DeepChosenEntry FlagsBits = 0x%x\n", ((LOADER_ENTRY*)DeepChosenEntry)->Flags);
-                    if (DeepMenuExit == MENU_EXIT_ENTER) {
-                      DeepMenuExit = 0;
-                    }
                   } //while(!DeepMenuExit)
                 }
               }

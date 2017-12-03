@@ -192,6 +192,7 @@ UINT8 GetOSTypeFromPath(IN CHAR16 *Path)
              (StriCmp(Path, L"\\Mac OS X Install Data\\boot.efi") == 0) ||
              (StriCmp(Path, L"\\macOS Install Data\\boot.efi") == 0) ||
              (StriCmp(Path, L"\\macOS Install Data\\Locked Files\\Boot Files\\boot.efi") == 0) ||
+             (StriCmp(Path, L"\\com.apple.boot.R\\boot.efi") == 0) ||
              (StriCmp(Path, L"\\.IABootFiles\\boot.efi") == 0)) {
     return OSTYPE_OSX_INSTALLER;
   } else if (StriCmp(Path, L"\\com.apple.recovery.boot\\boot.efi") == 0) {
@@ -682,6 +683,7 @@ STATIC VOID AddDefaultMenu(IN LOADER_ENTRY *Entry)
   UINT64            VolumeSize;
   EFI_GUID          *Guid = NULL;
   BOOLEAN           KernelIs64BitOnly;
+  UINT64            os_version = AsciiOSVersionToUint64(Entry->OSVersion);
 
   if (Entry == NULL) {
     return;
@@ -721,15 +723,33 @@ STATIC VOID AddDefaultMenu(IN LOADER_ENTRY *Entry)
       Entry->LoaderType == OSTYPE_RECOVERY) { // entries for Mac OS X
     AddMenuInfoLine(SubScreen, PoolPrint(L"macOS %a", Entry->OSVersion));
 
+    if (OSFLAG_ISSET(Entry->Flags, OSFLAG_HIBERNATED)) {
+      SubEntry = DuplicateLoaderEntry(Entry);
+      if (SubEntry) {
+        SubEntry->me.Title        = L"Cancel hibernate wake";
+        SubEntry->Flags           = OSFLAG_UNSET(SubEntry->Flags, OSFLAG_HIBERNATED);
+        AddMenuEntry(SubScreen, (REFIT_MENU_ENTRY *)SubEntry);
+      }
+    }
+
     SubEntry = DuplicateLoaderEntry(Entry);
     if (SubEntry) {
-      SubEntry->me.Title        = L"Cancel hibernate wake";
-      SubEntry->Flags           = OSFLAG_UNSET(SubEntry->Flags, OSFLAG_HIBERNATED);
+      SubEntry->me.Title        = L"Boot macOS with selected options";
+      AddMenuEntry(SubScreen, (REFIT_MENU_ENTRY *)SubEntry);
+    }
+    
+    SubEntry = DuplicateLoaderEntry(Entry);
+    if (SubEntry) {
+      SubEntry->me.Title        = L"Boot macOS with injected kexts";
+      SubEntry->Flags           = OSFLAG_UNSET(SubEntry->Flags, OSFLAG_CHECKFAKESMC);
+      SubEntry->Flags           = OSFLAG_SET(SubEntry->Flags, OSFLAG_WITHKEXTS);
       AddMenuEntry(SubScreen, (REFIT_MENU_ENTRY *)SubEntry);
     }
     SubEntry = DuplicateLoaderEntry(Entry);
     if (SubEntry) {
-      SubEntry->me.Title        = L"Boot macOS with selected options";
+      SubEntry->me.Title        = L"Boot macOS without injected kexts";
+      SubEntry->Flags           = OSFLAG_UNSET(SubEntry->Flags, OSFLAG_CHECKFAKESMC);
+      SubEntry->Flags           = OSFLAG_UNSET(SubEntry->Flags, OSFLAG_WITHKEXTS );
       AddMenuEntry(SubScreen, (REFIT_MENU_ENTRY *)SubEntry);
     }
 
@@ -740,6 +760,10 @@ STATIC VOID AddDefaultMenu(IN LOADER_ENTRY *Entry)
       AddMenuCheck(SubScreen, "macOS 64bit",          OPT_X64,  68);
     }
     AddMenuCheck(SubScreen, "Verbose (-v)",                               OPT_VERBOSE, 68);
+    // No Caches option works on 10.6/10.7/10.8/10.9
+    if (os_version < AsciiOSVersionToUint64("10.10")) {
+      AddMenuCheck(SubScreen, "Without caches (-f)",                        OPT_NOCACHES, 68);
+    }
     AddMenuCheck(SubScreen, "Single User (-s)",                           OPT_SINGLE_USER, 68);
     AddMenuCheck(SubScreen, "Safe Mode (-x)",                             OPT_SAFE, 68);
     AddMenuCheck(SubScreen, "Disable KASLR (slide=0)",                    OPT_SLIDE, 68);
@@ -955,6 +979,7 @@ VOID ScanLoader(VOID)
     AddLoaderEntry(L"\\Mac OS X Install Data\\boot.efi", NULL, L"Mac OS X Install", Volume, NULL, OSTYPE_OSX_INSTALLER, 0);
     AddLoaderEntry(L"\\macOS Install Data\\boot.efi", NULL, L"macOS Install", Volume, NULL, OSTYPE_OSX_INSTALLER, 0);
     AddLoaderEntry(L"\\macOS Install Data\\Locked Files\\Boot Files\\boot.efi", NULL, L"macOS Install", Volume, NULL, OSTYPE_OSX_INSTALLER, 0);
+    AddLoaderEntry(L"\\com.apple.boot.R\\boot.efi", NULL, L"macOS Install", Volume, NULL, OSTYPE_OSX_INSTALLER, 0);
     AddLoaderEntry(L"\\.IABootFiles\\boot.efi", NULL, L"OS X Install", Volume, NULL, OSTYPE_OSX_INSTALLER, 0);
 
     // Use standard location for boot.efi, unless the file /.IAPhysicalMedia is present

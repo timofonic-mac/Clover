@@ -114,14 +114,14 @@ VOID *GetNvramVariable (
 /** Sets NVRAM variable. Does nothing if variable with the same data and attributes already exists. */
 EFI_STATUS
 SetNvramVariable (
- 	IN  CHAR16   *VariableName,
- 	IN  EFI_GUID *VendorGuid,
-  IN  UINT32   Attributes,
-  IN  UINTN    DataSize,
-  IN  VOID     *Data
+    IN  CHAR16   *VariableName,
+    IN  EFI_GUID *VendorGuid,
+    IN  UINT32   Attributes,
+    IN  UINTN    DataSize,
+    IN  VOID     *Data
   )
 {
-//EFI_STATUS Status;
+  //EFI_STATUS Status;
   VOID   *OldData;
   UINTN  OldDataSize = 0;
   UINT32 OldAttributes = 0;
@@ -139,18 +139,19 @@ SetNvramVariable (
       FreePool (OldData);
       return EFI_SUCCESS;
     }
-    //DBG (", not equal");
+    //DBG (", not equal\n");
     
     FreePool (OldData);
     
     // not the same - delete previous one if attributes are different
     if (OldAttributes != Attributes) {
-		  DeleteNvramVariable (VariableName, VendorGuid);
+      DeleteNvramVariable (VariableName, VendorGuid);
       //DBG (", diff. attr: deleting old (%r)", Status);
     }
   }
-//  DBG (" -> writing new (%r)\n", Status);
-//  return Status;
+  //DBG ("\n"); // for debug without Status
+  //DBG (" -> writing new (%r)\n", Status);
+  //return Status;
  
   return gRT->SetVariable (VariableName, VendorGuid, Attributes, DataSize, Data);
   
@@ -168,7 +169,7 @@ AddNvramVariable (
 {
   VOID       *OldData;
 
-  //DBG ("SetNvramVariable (%s, guid, 0x%x, %d):", VariableName, Attributes, DataSize);
+  //DBG ("SetNvramVariable (%s, guid, 0x%x, %d):\n", VariableName, Attributes, DataSize);
   OldData = GetNvramVariable (VariableName, VendorGuid, NULL, NULL);
   if (OldData == NULL)
   {
@@ -193,8 +194,77 @@ DeleteNvramVariable (
     
   // Delete: attributes and data size = 0
   Status = gRT->SetVariable (VariableName, VendorGuid, 0, 0, NULL);
-  //DBG ("DeleteNvramVariable (%s, guid = %r\n):", VariableName, Status);
+  //DBG ("DeleteNvramVariable (%s, guid = %r):\n", VariableName, Status);
     
+  return Status;
+}
+
+EFI_STATUS
+ResetEmuNvram ()
+{
+  EFI_STATUS      Status = EFI_NOT_FOUND;
+  UINTN           VolumeIndex;
+  REFIT_VOLUME    *Volume;
+  EFI_FILE_HANDLE FileHandle;
+
+  //DBG("ResetEmuNvram: searching volumes for nvram.plist\n");
+
+  for (VolumeIndex = 0; VolumeIndex < VolumesCount; ++VolumeIndex) {
+     Volume = Volumes[VolumeIndex];
+        
+     if (!Volume->RootDir) {
+       continue;
+     }
+
+     Status = Volume->RootDir->Open (Volume->RootDir, &FileHandle, L"nvram.plist", EFI_FILE_MODE_READ, 0);
+     if (EFI_ERROR(Status)) {
+       //DBG("- [%02d]: '%s' - no nvram.plist - skipping!\n", VolumeIndex, Volume->VolName);
+       continue;
+     }
+     
+     // find the partition where nvram.plist can be deleted and delete it
+     if (Volume != NULL) {
+       if (StriStr(Volume->VolName, L"EFI") != NULL) {
+         //DBG("- [%02d]: '%s' - found nvram.plist and deleted it\n", VolumeIndex, Volume->VolName);
+         Status = DeleteFile (Volume->RootDir, L"nvram.plist");
+       } else {
+         //DBG("- [%02d]: '%s' - found nvram.plist but can't delete it\n", VolumeIndex, Volume->VolName);
+       }
+     }
+  }
+
+  //DBG("ResetEmuNvram: cleanup NVRAM variables\n");
+
+  // TODO: if want to delete more nvram variables like realmac's reset NVRAM, consider it
+  //DeleteNvramVariable(L"boot-args",               &gEfiAppleBootGuid);
+  //DeleteNvramVariable(L"nvda_drv",                &gEfiAppleBootGuid);
+
+  // hibernate keys for hibernationfixup
+  // delete these keys so that instant reboot does not occur on systems where hibernate is not functioning properly.
+  //DeleteNvramVariable(L"Boot0082",                &gEfiGlobalVariableGuid);
+  //DeleteNvramVariable(L"BootNext",                &gEfiGlobalVariableGuid);
+  //DeleteNvramVariable(L"IOHibernateRTCVariables", &gEfiAppleBootGuid);
+  //DeleteNvramVariable(L"boot-image",              &gEfiAppleBootGuid);
+  //DeleteNvramVariable(L"boot-image-key",          &gEfiAppleBootGuid);
+  //DeleteNvramVariable(L"boot-signature",          &gEfiAppleBootGuid);
+  //DeleteNvramVariable(L"boot-switch-vars",        &gEfiAppleBootGuid);
+
+  return Status;
+}
+
+EFI_STATUS
+ResetNativeNvram ()
+{
+  EFI_STATUS    Status;
+
+  //DBG("ResetNativeNvram: cleanup NVRAM variables\n");
+
+  // TODO: if want to delete more nvram variables like realmac's reset NVRAM, consider it
+  //Status = DeleteNvramVariable(L"prev-lang:kbd",          &gEfiAppleBootGuid);
+  //Status = DeleteNvramVariable(L"backlight-level",        &gEfiAppleBootGuid);
+  Status = DeleteNvramVariable(L"boot-args",              &gEfiAppleBootGuid);
+  Status = DeleteNvramVariable(L"nvda_drv",               &gEfiAppleBootGuid);
+
   return Status;
 }
 
@@ -870,7 +940,7 @@ PutNvramPlistToRtVars ()
       Value = ValTag->string;
       Size  = AsciiStrLen (Value);
       if (!GlobalConfig.DebugLog) {
-        DBG ("String: Size = %d, Val = '%a'", Size, Value);
+        DBG ("String: Size = %d, Val = '%a'\n", Size, Value);
       }
       
     } else if (ValTag->type == kTagTypeData) {
@@ -883,6 +953,9 @@ PutNvramPlistToRtVars ()
         for (i = 0; i < Size; i++) {
           DBG("%02x ", *((UINT8*)Value + i));
         }
+      }
+      if (!GlobalConfig.DebugLog) {
+       DBG ("\n");
       }
     } else {
       DBG ("ERROR: Unsupported tag type: %d\n", ValTag->type);
@@ -909,9 +982,6 @@ PutNvramPlistToRtVars ()
                       Size,
                       Value
                       );
-    if (!GlobalConfig.DebugLog) {
-      DBG ("\n");
-    }
   }
 }
 

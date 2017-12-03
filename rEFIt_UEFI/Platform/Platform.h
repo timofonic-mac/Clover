@@ -557,6 +557,7 @@ MSR C001006B  0000-0000-0000-0000
 #define FIX_HDMI      bit(27)
 #define FIX_REGIONS   bit(28)
 #define FIX_HEADERS   bit(29)
+#define FIX_MUTEX     bit(30)
 
 //devices
 #define DEV_ATI       bit(0)
@@ -611,7 +612,7 @@ MSR C001006B  0000-0000-0000-0000
 /// @param FIELDTYPE    The type of the member field
 /// @param Field        The name of the field of which to get the address
 /// @return The address of the offset of the member field in the instance structure
-#define ADDRESS_OF(INSTANCETYPE, Instance, FIELDTYPE, Field) (FIELDTYPE *)(((UINT8 *)(Instance)) + OFFSET_OF(INSTANCETYPE, Field))
+//#define ADDRESS_OF(INSTANCETYPE, Instance, FIELDTYPE, Field) (FIELDTYPE *)(((UINT8 *)(Instance)) + OFFSET_OF(INSTANCETYPE, Field))
 
 
 struct aml_chunk
@@ -684,9 +685,6 @@ typedef struct _DRIVERS_FLAGS {
   BOOLEAN APFSLoaded;
 } DRIVERS_FLAGS;
 
-#pragma pack(push)
-#pragma pack(1)
-
 struct Symbol {
   UINTN         refCount;
   struct Symbol *next;
@@ -706,6 +704,9 @@ typedef struct {
   VOID   *tagNext;
 
 } TagStruct, *TagPtr;
+
+#pragma pack(push)
+#pragma pack(1)
 
 typedef struct {
 
@@ -729,6 +730,8 @@ typedef struct {
 } GUID;
 */
 
+#pragma pack(pop)
+
 typedef struct DEV_PROPERTY DEV_PROPERTY; //yyyy
 struct DEV_PROPERTY {
   UINT32        Device;
@@ -740,6 +743,7 @@ struct DEV_PROPERTY {
   INPUT_ITEM    MenuItem;
   TAG_TYPE      ValueType;
 };
+
 
 typedef struct CUSTOM_LOADER_ENTRY CUSTOM_LOADER_ENTRY;
 struct CUSTOM_LOADER_ENTRY {
@@ -820,11 +824,12 @@ struct ACPI_PATCHED_AML
 // syscl - Side load kext
 typedef struct SIDELOAD_KEXT SIDELOAD_KEXT;
 struct SIDELOAD_KEXT {
-    SIDELOAD_KEXT  *Next;
-    SIDELOAD_KEXT  *PlugInList;
-    CHAR16         *FileName;
-    CHAR16         *MatchOS;
-    INPUT_ITEM     MenuItem;
+  SIDELOAD_KEXT  *Next;
+  SIDELOAD_KEXT  *PlugInList;
+  CHAR16         *FileName;
+  CHAR16         *MatchOS;
+  CHAR16         *Version;
+  INPUT_ITEM     MenuItem;
 };
 
 // SysVariables
@@ -905,19 +910,13 @@ typedef struct {
   CHAR16                  CustomUuid[40];
   
   CHAR16                  *DefaultVolume;
-#if defined(MDE_CPU_IA32)
-  UINT32                  align10;
-#endif
   CHAR16                  *DefaultLoader;
-#if defined(MDE_CPU_IA32)
-  UINT32                  align11;
-#endif
 //Boot
   BOOLEAN                 LastBootedVolume;
   BOOLEAN                 SkipHibernateTimeout;
 //Monitor
   BOOLEAN                 IntelMaxBacklight;
-  UINT8                   Pad21[1];
+//  UINT8                   Pad21[1];
   UINT16                  VendorEDID;
   UINT16                  ProductEDID;  
   UINT16                  BacklightLevel;
@@ -933,7 +932,7 @@ typedef struct {
   // GUI parameters
   BOOLEAN                 Debug;
   BOOLEAN                 Proportional;
-  UINT8                   Pad22[1];
+//  UINT8                   Pad22[1];
   UINT32                  DefaultBackgroundColor;
 
   //ACPI
@@ -941,8 +940,14 @@ typedef struct {
   UINT8                   ResetVal;
   BOOLEAN                 NoASPM;
   BOOLEAN                 DropSSDT;
+  BOOLEAN                 NoOemTableId;
+  BOOLEAN                 NoDynamicExtract;
+  BOOLEAN                 AutoMerge;
   BOOLEAN                 GeneratePStates;
   BOOLEAN                 GenerateCStates;
+  BOOLEAN                 GenerateAPSN;
+  BOOLEAN                 GenerateAPLF;
+  BOOLEAN                 GeneratePluginType;
   UINT8                   PLimitDict;
   UINT8                   UnderVoltStep;
   BOOLEAN                 DoubleFirstState;
@@ -963,7 +968,7 @@ typedef struct {
   UINT8                   MinMultiplier;
   UINT8                   MaxMultiplier;
   UINT8                   PluginType;
-  BOOLEAN                 DropMCFG;
+//  BOOLEAN                 DropMCFG;
 
   //Injections
   BOOLEAN                 StringInjector;
@@ -988,24 +993,16 @@ typedef struct {
   BOOLEAN                 InjectIntel;
   BOOLEAN                 InjectATI;
   BOOLEAN                 InjectNVidia;
+  BOOLEAN                 DeInit;
   BOOLEAN                 LoadVBios;
   BOOLEAN                 PatchVBios;
   VBIOS_PATCH_BYTES       *PatchVBiosBytes;
-#if defined(MDE_CPU_IA32)
-  UINT32                  align12;
-#endif
 
   UINTN                   PatchVBiosBytesCount;
-#if defined(MDE_CPU_IA32)
-  UINT32                  align1;
-#endif
   BOOLEAN                 InjectEDID;
   BOOLEAN                 LpcTune;
   UINT16                  DropOEM_DSM;
   UINT8                   *CustomEDID;
-#if defined(MDE_CPU_IA32)
-  UINT32  align13;
-#endif
 
   CHAR16                  FBName[16];
   UINT16                  VideoPorts;
@@ -1025,14 +1022,8 @@ typedef struct {
   UINT32                  SecureBootWhiteListCount;
   UINT32                  SecureBootBlackListCount;
   CHAR16                  **SecureBootWhiteList;
-#if defined(MDE_CPU_IA32)
-  UINT32                  align14;
-#endif
 
   CHAR16                  **SecureBootBlackList;
-#if defined(MDE_CPU_IA32)
-  UINT32                  align15;
-#endif
 
   // Secure boot
   UINT8                   SecureBoot;
@@ -1064,14 +1055,8 @@ typedef struct {
 
   //Volumes hiding
   CHAR16                  **HVHideStrings;
-#if defined(MDE_CPU_IA32)
-  UINT32  align191;
-#endif
 
   INTN                    HVCount;
-#if defined(MDE_CPU_IA32)
-  UINT32  align4;
-#endif
 
   // KernelAndKextPatches
   KERNEL_AND_KEXT_PATCHES KernelAndKextPatches;  //zzzz
@@ -1083,9 +1068,6 @@ typedef struct {
   //Pointer
   BOOLEAN                 PointerEnabled;
   INTN                    PointerSpeed;
-#if defined(MDE_CPU_IA32)
-  UINT32                  align5;
-#endif
   UINT64                  DoubleClickTime;
   BOOLEAN                 PointerMirror;
 
@@ -1097,18 +1079,8 @@ typedef struct {
 
   // SysVariables
   CHAR8                   *RtMLB;
-#if defined(MDE_CPU_IA32)
-  UINT32                  align20;
-#endif
-
   UINT8                   *RtROM;
-#if defined(MDE_CPU_IA32)
-  UINT32                  align21;
-#endif
   UINTN                   RtROMLen;
-#if defined(MDE_CPU_IA32)
-  UINT32                  align6;
-#endif
 
   UINT32                  CsrActiveConfig;
   UINT16                  BooterConfig;
@@ -1117,24 +1089,11 @@ typedef struct {
 
   // Multi-config
   CHAR16  *ConfigName;
-#if defined(MDE_CPU_IA32)
-  UINT32                  align24;
-#endif
-
   CHAR16  *MainConfigName;
-#if defined(MDE_CPU_IA32)
-  UINT32                  align25;
-#endif
 
   //Drivers
   INTN    BlackListCount;
-#if defined(MDE_CPU_IA32)
-  UINT32                  align7;
-#endif
   CHAR16                  **BlackList;
-#if defined(MDE_CPU_IA32)
-  UINT32                  align26;
-#endif
 
   //SMC keys
   CHAR8                   RPlt[8];
@@ -1146,32 +1105,15 @@ typedef struct {
   BOOLEAN                 Rtc8Allowed;
   BOOLEAN                 ForceHPET;
   BOOLEAN                 ResetHDA;
-  BOOLEAN                 DeInit;  //for tests
-  UINT8                   pad8[2];
   UINT32                  DisableFunctions;
 
   //Patch DSDT arbitrary
   UINT32                  PatchDsdtNum;
   UINT8                   **PatchDsdtFind;
-#if defined(MDE_CPU_IA32)
-  UINT32                  align27;
-#endif
-
   UINT32 *LenToFind;
-#if defined(MDE_CPU_IA32)
-  UINT32                  align28;
-#endif
-
   UINT8  **PatchDsdtReplace;
-#if defined(MDE_CPU_IA32)
-  UINT32                  align29;
-#endif
 
   UINT32 *LenToReplace;
-#if defined(MDE_CPU_IA32)
-  UINT32                  align30;
-#endif
-
   BOOLEAN                 DebugDSDT;
   BOOLEAN                 SlpWak;
   BOOLEAN                 UseIntelHDMI;
@@ -1181,10 +1123,6 @@ typedef struct {
 
   // Table dropping
   ACPI_DROP_TABLE         *ACPIDropTables;
-#if defined(MDE_CPU_IA32)
-  UINT32  align32;
-#endif
-
 
   // Custom entries
   BOOLEAN                 DisableEntryScan;
@@ -1194,27 +1132,12 @@ typedef struct {
   BOOLEAN                 LinuxScan;
   UINT8                   pad84[3];
   CUSTOM_LOADER_ENTRY     *CustomEntries;
-#if defined(MDE_CPU_IA32)
-  UINT32                  align33;
-#endif
   CUSTOM_LEGACY_ENTRY     *CustomLegacy;
-#if defined(MDE_CPU_IA32)
-  UINT32                  align34;
-#endif
   CUSTOM_TOOL_ENTRY       *CustomTool;
-#if defined(MDE_CPU_IA32)
-  UINT32                  align35;
-#endif
 
   //Add custom properties
   UINTN                   NrAddProperties;
-#if defined(MDE_CPU_IA32)
-  UINT32  align8;
-#endif
   DEV_PROPERTY            *AddProperties;
-#if defined(MDE_CPU_IA32)
-  UINT32                  align31;
-#endif
 
   //BlackListed kexts
   CHAR16                  BlockKexts[64];
@@ -1226,18 +1149,13 @@ typedef struct {
 
   //ACPI tables
   UINTN                   SortedACPICount;
-#if defined(MDE_CPU_IA32)
-  UINT32                  align37;
-#endif
   CHAR16                  **SortedACPI;
-#if defined(MDE_CPU_IA32)
-  UINT32                  align38;
-#endif
 
   // ACPI/PATCHED/AML
   UINT32                  DisabledAMLCount;
   CHAR16                  **DisabledAML;
   CHAR8                   **PatchDsdtLabel; //yyyy
+  CHAR8                   **PatchDsdtTgt;
   INPUT_ITEM              *PatchDsdtMenuItem;
   
   //other
@@ -1602,7 +1520,7 @@ typedef struct {
 #define CARDLIST_SIGNATURE SIGNATURE_32('C','A','R','D')
 
 
-#pragma pack(pop)
+
 //extern CHAR8                          *msgbuf;
 //extern CHAR8                          *msgCursor;
 extern APPLE_SMBIOS_STRUCTURE_POINTER SmbiosTable;
@@ -1661,7 +1579,7 @@ extern INPUT_ITEM                     *InputItems;
 extern BOOLEAN                        SavePreBootLog;
 extern CHAR8                          *BootOSName;
 //extern EFI_GRAPHICS_OUTPUT_PROTOCOL *GraphicsOutput;
-extern UINT32                    machineSignature;
+extern UINT64                    machineSignature;
 
 extern EFI_GUID                        gEfiAppleBootGuid;
 extern EFI_GUID                        gEfiAppleNvramGuid;
@@ -1807,12 +1725,6 @@ IsValidGuidAsciiString (
   IN CHAR8 *Str
   );
 
-#if 0
-EFI_STATUS
-StrToGuid2 (
-  IN      CHAR16   *Str,
-     OUT  EFI_GUID *Guid);
-#endif
 
 EFI_STATUS
 StrToGuidLE (
@@ -1958,6 +1870,16 @@ DeleteNvramVariable (
   IN  CHAR16   *VariableName,
   IN  EFI_GUID *VendorGuid
   );
+
+VOID
+ResetNvram ();
+
+EFI_STATUS
+ResetEmuNvram ();
+
+EFI_STATUS
+ResetNativeNvram ();
+;
 
 EFI_STATUS
 GetEfiBootDeviceFromNvram ();
@@ -2114,10 +2036,14 @@ Checksum8 (
   UINT32 len
   );
 
+void FixChecksum(EFI_ACPI_DESCRIPTION_HEADER* Table);
+
+/*
 BOOLEAN
 tableSign (
   CHAR8       *table,
   CONST CHAR8 *sgn);
+ */
 
 VOID
 SaveOemDsdt (

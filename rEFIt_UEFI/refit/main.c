@@ -426,15 +426,16 @@ VOID FilterBootPatches(IN LOADER_ENTRY *Entry)
         DBG(" ==> disabled by user\n");
         continue;
       }
-      
+
       if ((Entry->BuildVersion != NULL) && (Entry->KernelAndKextPatches->BootPatches[i].MatchBuild != NULL)) {
         Entry->KernelAndKextPatches->BootPatches[i].MenuItem.BValue = IsPatchEnabled(Entry->KernelAndKextPatches->BootPatches[i].MatchBuild, Entry->BuildVersion);
         DBG(" ==> %a by build\n", Entry->KernelAndKextPatches->BootPatches[i].MenuItem.BValue ? "allowed" : "not allowed");
         continue;
       }
-      
+ 
       Entry->KernelAndKextPatches->BootPatches[i].MenuItem.BValue = IsPatchEnabled(Entry->KernelAndKextPatches->BootPatches[i].MatchOS, Entry->OSVersion);
       DBG(" ==> %a by OS\n", Entry->KernelAndKextPatches->BootPatches[i].MenuItem.BValue ? "allowed" : "not allowed");
+  
     }
   }
 }
@@ -810,6 +811,8 @@ static VOID StartLoader(IN LOADER_ENTRY *Entry)
       Status = gRT->SetVariable(L"boot-switch-vars", &gEfiAppleBootGuid,
                                 EFI_VARIABLE_NON_VOLATILE | EFI_VARIABLE_BOOTSERVICE_ACCESS | EFI_VARIABLE_RUNTIME_ACCESS,
                                 0, NULL);
+      DeleteNvramVariable(L"IOHibernateRTCVariables", &gEfiAppleBootGuid);
+      DeleteNvramVariable(L"boot-image",              &gEfiAppleBootGuid);
 
     }
     SetupBooterLog(!DoHibernateWake);
@@ -1605,6 +1608,29 @@ VOID SetVariablesFromNvram()
 
 }
 
+// Reset Native NVRAM, by cecekpawon
+// Reset EmuVariable NVRAM, implemented by Sherlocks
+VOID ResetNvram () 
+  {
+    if (gFirmwareClover || gDriversFlags.EmuVariableLoaded) {
+      //if (gEmuVariableControl != NULL) {
+      //  gEmuVariableControl->InstallEmulation(gEmuVariableControl);
+      //}
+      ResetEmuNvram ();
+      //if (gEmuVariableControl != NULL) {
+      //  gEmuVariableControl->UninstallEmulation(gEmuVariableControl);
+      //}
+    } else {
+      ResetNativeNvram ();
+    }
+    // Attempt warm reboot
+    gRS->ResetSystem(EfiResetWarm, EFI_SUCCESS, 0, NULL);
+    // Warm reboot may not be supported attempt cold reboot
+    gRS->ResetSystem(EfiResetCold, EFI_SUCCESS, 0, NULL);
+    // Terminate the screen and just exit
+    TerminateScreen();
+}
+
 VOID SetOEMPath(CHAR16 *ConfName)
   {
     if (ConfName == NULL) {
@@ -1975,21 +2001,23 @@ RefitMain (IN EFI_HANDLE           ImageHandle,
   InitializeSecureBoot();
 #endif // ENABLE_SECURE_BOOT
 
-#if HIBERNATE_DUMP_DATA
+#if 1 //HIBERNATE_DUMP_DATA
   {
 //    UINT32                    machineSignature    = 0;
     EFI_ACPI_2_0_FIXED_ACPI_DESCRIPTION_TABLE     *FadtPointer = NULL;
     EFI_ACPI_4_0_FIRMWARE_ACPI_CONTROL_STRUCTURE  *Facs = NULL;
 
-    DBG("---dump hibernations data---\n");
+//    DBG("---dump hibernations data---\n");
     FadtPointer = GetFadt();
     if (FadtPointer != NULL) {
       Facs = (EFI_ACPI_4_0_FIRMWARE_ACPI_CONTROL_STRUCTURE*)(UINTN)(FadtPointer->FirmwareCtrl);
+      /*
       DBG("  Firmware wake address=%08lx\n", Facs->FirmwareWakingVector);
       DBG("  Firmware wake 64 addr=%16llx\n",  Facs->XFirmwareWakingVector);
       DBG("  Hardware signature   =%08lx\n", Facs->HardwareSignature);
       DBG("  GlobalLock           =%08lx\n", Facs->GlobalLock);
       DBG("  Flags                =%08lx\n", Facs->Flags);
+       */
       machineSignature = Facs->HardwareSignature;
     }
 /*------------------------------------------------------
@@ -2257,7 +2285,6 @@ RefitMain (IN EFI_HANDLE           ImageHandle,
     }
 
     if (!GlobalConfig.FastBoot) {
-      
 
       CHAR16 *TmpArgs;
 
@@ -2275,7 +2302,6 @@ RefitMain (IN EFI_HANDLE           ImageHandle,
       //now it is a time to set RtVariables
       SetVariablesFromNvram();
       
-
       TmpArgs = PoolPrint(L"%a ", gSettings.BootArgs);
       DBG("after NVRAM boot-args=%a\n", gSettings.BootArgs);
       gSettings.OptionsBits = EncodeOptions(TmpArgs);

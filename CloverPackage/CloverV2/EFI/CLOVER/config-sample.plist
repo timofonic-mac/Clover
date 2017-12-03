@@ -9,8 +9,6 @@
 	</array>
 	<key>ACPI</key>
 	<dict>
-		<key>#DropMCFG</key>
-		<false/>
 		<key>#PatchAPIC</key>
 		<false/>
 		<key>#ResetAddress</key>
@@ -24,6 +22,8 @@
 			<string>SSDT-2.aml</string>
 		</array>
 		<key>#smartUPS</key>
+		<false/>
+		<key>AutoMerge</key>
 		<false/>
 		<key>DSDT</key>
 		<dict>
@@ -56,18 +56,81 @@
 				<key>WIFI</key>
 				<true/>
 			</dict>
-			<key>#Patches</key>
+			<key>#Rtc8Allowed</key>
+			<false/>
+			<key>#SuspendOverride</key>
+			<false/>
+			<key>Debug</key>
+			<false/>
+			<key>Fixes</key>
+			<dict>
+				<key>AddDTGP</key>
+				<true/>
+				<key>AddHDMI</key>
+				<true/>
+				<key>AddIMEI</key>
+				<false/>
+				<key>AddMCHC</key>
+				<false/>
+				<key>AddPNLF</key>
+				<true/>
+				<key>DeleteUnused</key>
+				<true/>
+				<key>FakeLPC</key>
+				<false/>
+				<key>FixACST</key>
+				<true/>
+				<key>FixADP1</key>
+				<true/>
+				<key>FixAirport</key>
+				<false/>
+				<key>FixDarwin</key>
+				<false/>
+				<key>FixDarwin7</key>
+				<true/>
+				<key>FixDisplay</key>
+				<true/>
+				<key>FixFirewire</key>
+				<false/>
+				<key>FixHDA</key>
+				<true/>
+				<key>FixHPET</key>
+				<true/>
+				<key>FixHeaders</key>
+				<true/>
+				<key>FixIDE</key>
+				<false/>
+				<key>FixIPIC</key>
+				<true/>
+				<key>FixIntelGfx</key>
+				<false/>
+				<key>FixLAN</key>
+				<true/>
+				<key>FixMutex</key>
+				<false/>
+				<key>FixRTC</key>
+				<true/>
+				<key>FixRegions</key>
+				<true/>
+				<key>FixS3D</key>
+				<true/>
+				<key>FixSATA</key>
+				<false/>
+				<key>FixSBUS</key>
+				<true/>
+				<key>FixShutdown</key>
+				<true/>
+				<key>FixTMR</key>
+				<true/>
+				<key>FixUSB</key>
+				<true/>
+				<key>FixWAK</key>
+				<true/>
+			</dict>
+			<key>Name</key>
+			<string>DSDT.aml</string>
+			<key>Patches</key>
 			<array>
-				<dict>
-					<key>Comment</key>
-					<string>Remove battery device from desktop</string>
-					<key>Disabled</key>
-					<true/>
-					<key>Find</key>
-					<data>W4IeQkFUMQhfSElEDEHQDAoIX1VJRAEUCF9TVEEApAA=</data>
-					<key>Replace</key>
-					<data></data>
-				</dict>
 				<dict>
 					<key>Comment</key>
 					<string>Add _SUN property for GIGE</string>
@@ -92,84 +155,33 @@
 					<key>Comment</key>
 					<string>Rename HDEF to AZAL</string>
 					<key>Disabled</key>
-					<false/>
+					<true/>
 					<key>Find</key>
 					<data>SERFRg==</data>
 					<key>Replace</key>
 					<data>QVpBTA==</data>
 				</dict>
+				<dict>
+					<key>Comment</key>
+					<string>Rename oem _DSM to ZDSM</string>
+					<key>Disabled</key>
+					<false/>
+					<key>Find</key>
+					<data>X0RTTQ==</data>
+					<key>Replace</key>
+					<data>WkRTTQ==</data>
+				</dict>
+				<dict>
+					<key>Comment</key>
+					<string>Rename HECI to IMEI</string>
+					<key>Disabled</key>
+					<false/>
+					<key>Find</key>
+					<data>SEVDSQ==</data>
+					<key>Replace</key>
+					<data>SU1FSQ==</data>
+				</dict>
 			</array>
-			<key>#Rtc8Allowed</key>
-			<false/>
-			<key>#SuspendOverride</key>
-			<false/>
-			<key>Debug</key>
-			<false/>
-			<key>Fixes</key>
-			<dict>
-				<key>AddDTGP_0001</key>
-				<true/>
-				<key>AddHDMI_8000000</key>
-				<true/>
-				<key>AddIMEI_80000</key>
-				<false/>
-				<key>AddMCHC_0008</key>
-				<false/>
-				<key>AddPNLF_1000000</key>
-				<true/>
-				<key>DeleteUnused_400000</key>
-				<true/>
-				<key>FIX_ACST_4000000</key>
-				<true/>
-				<key>FIX_ADP1_800000</key>
-				<true/>
-				<key>FIX_INTELGFX_100000</key>
-				<false/>
-				<key>FIX_RTC_20000</key>
-				<true/>
-				<key>FIX_S3D_2000000</key>
-				<true/>
-				<key>FIX_TMR_40000</key>
-				<true/>
-				<key>FIX_WAK_200000</key>
-				<true/>
-				<key>FakeLPC_0020</key>
-				<false/>
-				<key>FixAirport_4000</key>
-				<false/>
-				<key>FixDarwin_0002</key>
-				<false/>
-				<key>FixDarwin7_10000</key>
-				<true/>
-				<key>FixDisplay_0100</key>
-				<true/>
-				<key>FixFirewire_0800</key>
-				<false/>
-				<key>FixHDA_8000</key>
-				<true/>
-				<key>FixHPET_0010</key>
-				<true/>
-				<key>FixHeaders_20000000</key>
-				<true/>
-				<key>FixIDE_0200</key>
-				<false/>
-				<key>FixIPIC_0040</key>
-				<true/>
-				<key>FixLAN_2000</key>
-				<true/>
-				<key>FixRegions_10000000</key>
-				<true/>
-				<key>FixSATA_0400</key>
-				<false/>
-				<key>FixSBUS_0080</key>
-				<true/>
-				<key>FixShutdown_0004</key>
-				<true/>
-				<key>FixUSB_1000</key>
-				<true/>
-			</dict>
-			<key>Name</key>
-			<string>DSDT.aml</string>
 			<key>ReuseFFFF</key>
 			<false/>
 		</dict>
@@ -218,6 +230,10 @@
 			<integer>12</integer>
 			<key>#MinMultiplier</key>
 			<integer>8</integer>
+			<key>#NoDynamicExtract</key>
+			<false/>
+			<key>#NoOemTableId</key>
+			<false/>
 			<key>#PLimitDict</key>
 			<integer>1</integer>
 			<key>#PluginType</key>
@@ -228,6 +244,12 @@
 			<false/>
 			<key>Generate</key>
 			<dict>
+				<key>#APLF</key>
+				<false/>
+				<key>#APSN</key>
+				<false/>
+				<key>#PluginType</key>
+				<false/>
 				<key>CStates</key>
 				<true/>
 				<key>PStates</key>
@@ -237,18 +259,16 @@
 	</dict>
 	<key>Boot</key>
 	<dict>
-		<key>##Arguments</key>
-		<string>kext-dev-mode=1 rootless=0</string>
 		<key>#Arguments</key>
-		<string>-v arch=x86_64 slide=0 darkwake=0</string>
+		<string>slide=0 darkwake=0</string>
+		<key>#DefaultLoader</key>
+		<string>boot.efi</string>
 		<key>#LegacyBiosDefaultEntry</key>
 		<integer>0</integer>
 		<key>#XMPDetection</key>
 		<string>-1</string>
 		<key>Debug</key>
 		<false/>
-		<key>DefaultLoader</key>
-		<string>boot.efi</string>
 		<key>DefaultVolume</key>
 		<string>LastBootedVolume</string>
 		<key>DisableCloverHotkeys</key>
@@ -260,6 +280,8 @@
 		<key>NeverDoRecovery</key>
 		<true/>
 		<key>NeverHibernate</key>
+		<false/>
+		<key>SignatureFixup</key>
 		<false/>
 		<key>SkipHibernateTimeout</key>
 		<false/>
@@ -321,6 +343,8 @@
 				<data>AQAAAA==</data>
 			</dict>
 		</array>
+		<key>#AirportBridgeDeviceName</key>
+		<string>RP02</string>
 		<key>#Arbitrary</key>
 		<array>
 			<dict>
@@ -329,10 +353,10 @@
 				<key>CustomProperties</key>
 				<array>
 					<dict>
-						<key>Key</key>
-						<string>PCI-Thunderbolt</string>
 						<key>Disabled</key>
 						<true/>
+						<key>Key</key>
+						<string>PCI-Thunderbolt</string>
 						<key>Value</key>
 						<integer>3</integer>
 					</dict>
@@ -346,18 +370,18 @@
 				<key>CustomProperties</key>
 				<array>
 					<dict>
-						<key>Key</key>
-						<string>TBTDPLowToHigh</string>
 						<key>Disabled</key>
 						<true/>
+						<key>Key</key>
+						<string>TBTDPLowToHigh</string>
 						<key>Value</key>
 						<data>AQAAAA==</data>
 					</dict>
 					<dict>
-						<key>Key</key>
-						<string>ThunderboltUUID</string>
 						<key>Disabled</key>
 						<true/>
+						<key>Key</key>
+						<string>ThunderboltUUID</string>
 						<key>Value</key>
 						<data>CO8yvYVBslCHyHKPjwfU/A==</data>
 					</dict>
@@ -463,6 +487,8 @@
 				<string>01:00:00</string>
 			</dict>
 		</array>
+		<key>#DisableFunctions</key>
+		<string>0x18F6</string>
 		<key>#FakeID</key>
 		<dict>
 			<key>#ATI</key>
@@ -486,21 +512,21 @@
 		<false/>
 		<key>#Inject</key>
 		<false/>
+		<key>#IntelMaxValue</key>
+		<integer>1808</integer>
 		<key>#Properties</key>
 		<string>7a00000001000000010000006e0000000200000002010c00d041030a0000000001010600001b7fff040028000000500069006e0043006f006e00660069006700750072006100740069006f006e00730000000800000001080100180000006c00610079006f00750074002d00690064000000080000000c000000</string>
 		<key>#SetIntelBacklight</key>
 		<false/>
 		<key>#SetIntelMaxBacklight</key>
 		<true/>
-		<key>#IntelMaxValue</key>
-		<integer>1808</integer>
 		<key>Audio</key>
 		<dict>
 			<key>#Inject</key>
 			<string>0x0887</string>
-			<key>ResetHDA</key>
-			<true/>
 			<key>AFGLowPowerState</key>
+			<true/>
+			<key>ResetHDA</key>
 			<true/>
 		</dict>
 		<key>NoDefaultProperties</key>
@@ -518,10 +544,6 @@
 		</dict>
 		<key>UseIntelHDMI</key>
 		<false/>
-		<key>#DisableFunctions</key>
-		<string>0x18F6</string>		
-		<key>#AirportBridgeDeviceName</key>
-		<string>RP02</string>
 	</dict>
 	<key>GUI</key>
 	<dict>
@@ -690,6 +712,8 @@
 				<data>gAeoAjgE</data>
 			</dict>
 		</array>
+		<key>#RadeonDeInit</key>
+		<true/>
 		<key>#VRAM</key>
 		<integer>1024</integer>
 		<key>#VideoPorts</key>
@@ -735,7 +759,7 @@
 		</array>
 		<key>#FakeCPUID</key>
 		<string>0x010676</string>
-		<key>#ForceKextsToLoad</key>		
+		<key>#ForceKextsToLoad</key>
 		<array>
 			<string>\System\Library\Extensions\AMD6000Controller.kext</string>
 			<string>\System\Library\Extensions\AMDFramebuffer.kext</string>
@@ -798,6 +822,20 @@
 				<key>Replace</key>
 				<data>BAAAABQCAAAAAQAAAAAEBAAEAAAEAwAAAAEAABECAQUAAAAAAAAAAAAAAAAAAAAA</data>
 			</dict>
+			<dict>
+				<key>Comment</key>
+				<string>ATI name HD xxxx -&gt; HD6450</string>
+				<key>Disabled</key>
+				<false/>
+				<key>Find</key>
+				<data>SEQgNnh4eA==</data>
+				<key>MatchOS</key>
+				<string>10.12,10.13</string>
+				<key>Name</key>
+				<string>AMD6000Controller</string>
+				<key>Replace</key>
+				<data>SEQgNjQ1MA==</data>
+			</dict>
 		</array>
 		<key>AppleIntelCPUPM</key>
 		<false/>
@@ -809,12 +847,27 @@
 		<false/>
 		<key>KernelCpu</key>
 		<false/>
-		<key>KernelXCPM</key>
-		<false/>
 		<key>KernelLapic</key>
 		<false/>
 		<key>KernelPm</key>
 		<false/>
+		<key>KernelXCPM</key>
+		<false/>
+		<key>#KernelToPatch</key>
+		<array>
+			<dict>
+				<key>Comment</key>
+				<string>Infinite loop at wake</string>
+				<key>Disabled</key>
+				<true/>
+				<key>Find</key>
+				<data>TIn/6PXb/v8=</data>
+				<key>MatchOS</key>
+				<string>10.11</string>
+				<key>Replace</key>
+				<data>6/7/6PXb/v8=</data>
+			</dict>
+		</array>
 	</dict>
 	<key>RtVariables</key>
 	<dict>
@@ -947,6 +1000,8 @@
 		<string>0x0501</string>
 		<key>#CustomUUID</key>
 		<string>511CE201-1000-4000-9999-010203040506</string>
+		<key>#NoCaches</key>
+		<false/>
 		<key>#NvidiaWeb</key>
 		<false/>
 		<key>InjectKexts</key>

@@ -1730,7 +1730,121 @@ UINT32 FixAny (UINT8* dsdt, UINT32 len, UINT8* ToFind, UINT32 LenTF, UINT8* ToRe
   DBG(" ]\n"); //should not be here
   return len;
 }
+/* old method
+UINT32 FixRenameByBridge (UINT8* dsdt, UINT32 len, CHAR8* TgtBrgName, UINT8* TgtDevName, UINT8* TgtReplName)
+{
+  UINT32 i, k;
+  UINT32 BrdADR = 0, BridgeSize, DevADR;
+  CHAR8*  DevName;
+  UINT32 PCIADR, PCISIZE = 0;
 
+  PCIADR = GetPciDevice(dsdt, len);
+  if (PCIADR) {
+    PCISIZE = get_size(dsdt, PCIADR);
+  }
+  if (!PCISIZE) return len; //what is the bad DSDT ?!
+
+  DBG("Start ByBridge Rename Fix\n");
+  for (i=0x20; len >= 10 && i < len - 10; i++) {
+    if (CmpDev(dsdt, i, (UINT8*)TgtBrgName)) {
+      BrdADR = devFind(dsdt, i);
+      if (!BrdADR) {
+        continue;
+      }
+      BridgeSize = get_size(dsdt, BrdADR);
+      if(!BridgeSize) continue;
+      for (k = BrdADR + 9; k < BrdADR + BridgeSize; k++) {
+        if (CmpDev(dsdt, k, (UINT8*)TgtDevName)) {
+          DevADR = devFind(dsdt, k);
+          if (!DevADR) {
+            continue;
+          }
+          DevName = AllocateZeroPool(5);
+          CHAR8* NewDevName = (CHAR8*)TgtReplName;
+          CopyMem(DevName, dsdt+k, 4);
+          DBG("found device %a at bridge %a, renaming to %a\n",
+              DevName, TgtBrgName, NewDevName);
+          ReplaceName(dsdt + BrdADR, BridgeSize, DevName, NewDevName);
+          ArptName = TRUE;
+          break;
+        }
+      }
+    }
+  }
+  return len;
+}
+*/
+//new method. by goodwin_c
+UINT32 FixRenameByBridge2 (UINT8* dsdt, UINT32 len, CHAR8* TgtBrgName, UINT8* ToFind, UINT32 LenTF, UINT8* ToReplace, UINT32 LenTR)
+{
+  INT32 adr;
+  BOOLEAN found = FALSE;
+  UINT32 i, k;
+  UINT32 BrdADR = 0, BridgeSize;
+  UINT32 PCIADR, PCISIZE = 0;
+
+  if (!ToFind || !LenTF || !LenTR) {
+    DBG(" invalid patches!\n");
+    return len;
+  }
+
+  if (LenTF != LenTR) {
+    DBG(" find/replace different size!\n");
+    return len;
+  }
+
+  DBG(" pattern %02x%02x%02x%02x,", ToFind[0], ToFind[1], ToFind[2], ToFind[3]);
+  if ((LenTF + sizeof(EFI_ACPI_DESCRIPTION_HEADER)) > len) {
+    DBG(" the patch is too large!\n");
+    return len;
+  }
+
+  PCIADR = GetPciDevice(dsdt, len);
+  if (PCIADR) {
+    PCISIZE = get_size(dsdt, PCIADR);
+  }
+  if (!PCISIZE) return len; //what is the bad DSDT ?!
+
+  DBG("Start ByBridge Rename Fix\n");
+  for (i=0x20; len >= 10 && i < len - 10; i++) {
+    if (CmpDev(dsdt, i, (UINT8*)TgtBrgName)) {
+      BrdADR = devFind(dsdt, i);
+      if (!BrdADR) {
+        continue;
+      }
+      BridgeSize = get_size(dsdt, BrdADR);
+      if(!BridgeSize) continue;
+      if(BridgeSize <= LenTF) continue;
+
+      k = 0;
+      found = FALSE;
+      while (k <= 100) {
+        adr = FindBin(dsdt + BrdADR, BridgeSize, ToFind, LenTF);
+        if (adr < 0) {
+          if (found) {
+            DBG(" ]\n");
+          } else {
+            DBG(" bin not found / already patched!\n");
+          }
+          return len;
+        }
+
+        if (!found) {
+          DBG(" patched at: [");
+        }
+
+        DBG(" (%x)", adr);
+        found = TRUE;
+        if ((LenTR > 0) && (ToReplace != NULL)) {
+          CopyMem(dsdt + BrdADR + adr, ToReplace, LenTR);
+        }
+        k++;
+      }
+    }
+  }
+  DBG(" ]\n");
+  return len;
+}
 
 UINT32 FIXDarwin (UINT8* dsdt, UINT32 len)
 {
@@ -5004,6 +5118,29 @@ VOID GetBiosRegions(EFI_ACPI_2_0_FIXED_ACPI_DESCRIPTION_TABLE* fadt)
   }
 }
 
+// RehabMan: Fix Mutex with non-zero SyncLevel (change to zero)
+// For example: Mutex(ECMX, 3) -> Mutex(ECMX, 0)
+// representation example:
+//   Mutex(M2, 1) -> 5B 01 4D 32 5F 5F 01
+// Although Mutex with non-zero SyncLevel is perfectly legal macOS/OS X doesn't like
+// One of the common fixes for ACPI battery status on laptops
+#define IsNameChar(ch) (((ch)>='A' && (ch)<='Z') || ((ch)>='0' && (ch)<='9') || (ch)=='_')
+VOID FixMutex(UINT8 *dsdt, UINT32 len)
+{
+  UINT8* p = dsdt + sizeof(EFI_ACPI_DESCRIPTION_HEADER);
+  UINT8* end = dsdt + len - 7; // pattern is 7-bytes
+  DBG("Start Mutex Fix\n");
+  for (; p <= end; p++) {
+    if (p[0] == 0x5b && p[1] == 0x01 &&
+        IsNameChar(p[2]) && IsNameChar(p[3]) && IsNameChar(p[4]) && IsNameChar(p[5])) {
+      if (p[6] != 0) {
+        DBG("Fixing Mutex(%c%c%c%c, %d)\n", p[2], p[3], p[4], p[5], p[6]);
+      }
+      p[6] = 0;
+    }
+  }
+}
+
 
 VOID FixBiosDsdt (UINT8* temp, EFI_ACPI_2_0_FIXED_ACPI_DESCRIPTION_TABLE* fadt, CHAR8 *OSVersion)
 {
@@ -5037,13 +5174,24 @@ VOID FixBiosDsdt (UINT8* temp, EFI_ACPI_2_0_FIXED_ACPI_DESCRIPTION_TABLE* fadt, 
       if (!gSettings.PatchDsdtFind[i] || !gSettings.LenToFind[i]) {
         continue;
       }
-      
+
       DBG(" - [%a]:", gSettings.PatchDsdtLabel[i]); //yyyy
       if (gSettings.PatchDsdtMenuItem[i].BValue) {
-        DsdtLen = FixAny(temp, DsdtLen,
-                         gSettings.PatchDsdtFind[i], gSettings.LenToFind[i],
-                         gSettings.PatchDsdtReplace[i], gSettings.LenToReplace[i]);
-  /*      DBG(" OK\n"); */
+        if (!gSettings.PatchDsdtTgt[i]) {
+              DsdtLen = FixAny(temp, DsdtLen,
+                           gSettings.PatchDsdtFind[i], gSettings.LenToFind[i],
+                           gSettings.PatchDsdtReplace[i], gSettings.LenToReplace[i]);
+
+        }else{
+    //      DBG("Patching: renaming in bridge\n");
+          DsdtLen = FixRenameByBridge2(temp, DsdtLen,
+                           gSettings.PatchDsdtTgt[i],
+                           gSettings.PatchDsdtFind[i],
+                           gSettings.LenToFind[i],
+                           gSettings.PatchDsdtReplace[i],
+                           gSettings.LenToReplace[i]);
+
+        }
       } else {
         DBG(" disabled\n"); 
       }
@@ -5220,6 +5368,12 @@ VOID FixBiosDsdt (UINT8* temp, EFI_ACPI_2_0_FIXED_ACPI_DESCRIPTION_TABLE* fadt, 
   if ((gSettings.FixDsdt & FIX_REGIONS)) {
     FixRegions(temp, DsdtLen);
   }
+  
+  //RehabMan: Fix Mutex objects
+  if ((gSettings.FixDsdt & FIX_MUTEX)) {
+    FixMutex(temp, DsdtLen);
+  }
+
 
      // pwrb add _CID sleep button fix
   if ((gSettings.FixDsdt & FIX_ADP1)) {
@@ -5241,6 +5395,7 @@ VOID FixBiosDsdt (UINT8* temp, EFI_ACPI_2_0_FIXED_ACPI_DESCRIPTION_TABLE* fadt, 
   }
 
   // Finish DSDT patch and resize DSDT Length
+/*
   temp[4] = (DsdtLen & 0x000000FF);
   temp[5] = (UINT8)((DsdtLen & 0x0000FF00) >>  8);
   temp[6] = (UINT8)((DsdtLen & 0x00FF0000) >> 16);
@@ -5250,6 +5405,10 @@ VOID FixBiosDsdt (UINT8* temp, EFI_ACPI_2_0_FIXED_ACPI_DESCRIPTION_TABLE* fadt, 
   //DBG("orgBiosDsdtLen = 0x%08x\n", orgBiosDsdtLen);
   ((EFI_ACPI_DESCRIPTION_HEADER*)temp)->Checksum = 0;
   ((EFI_ACPI_DESCRIPTION_HEADER*)temp)->Checksum = (UINT8)(256-Checksum8(temp, DsdtLen));
+  */
+  EFI_ACPI_DESCRIPTION_HEADER* Table = (EFI_ACPI_DESCRIPTION_HEADER*)temp;
+  Table->Length = DsdtLen;
+  FixChecksum(Table);
 
   //DBG("========= Auto patch DSDT Finished ========\n");
   //PauseForKey(L"waiting for key press...\n");

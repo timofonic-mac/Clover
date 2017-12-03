@@ -146,9 +146,46 @@ REFIT_CONFIG   GlobalConfig = {
   FALSE,          // BOOLEAN     Proportional;
   FALSE,          // BOOLEAN     NoEarlyProgress;
   FALSE,          // BOOLEAN     ShowOptimus;
-  FALSE,          // BOOLEAN     HibernationFixup
+  FALSE,          // BOOLEAN     HibernationFixup;
+  FALSE,          // BOOLEAN     SignatureFixup;
 //  0,              // INTN        PruneScrollRows;
 };
+
+static struct FIX_CONFIG { const CHAR8* oldName; const CHAR8* newName; UINT32 bitData; } FixesConfig[] =
+{
+    { "AddDTGP_0001", "AddDTGP", FIX_DTGP },
+    { "FixDarwin_0002", "FixDarwin", FIX_WARNING },
+    { "FixShutdown_0004", "FixShutdown", FIX_SHUTDOWN },
+    { "AddMCHC_0008", "AddMCHC", FIX_MCHC },
+    { "FixHPET_0010", "FixHPET", FIX_HPET },
+    { "FakeLPC_0020", "FakeLPC", FIX_LPC },
+    { "FixIPIC_0040", "FixIPIC", FIX_IPIC },
+    { "FixSBUS_0080", "FixSBUS", FIX_SBUS },
+    { "FixDisplay_0100", "FixDisplay", FIX_DISPLAY },
+    { "FixIDE_0200", "FixIDE", FIX_IDE },
+    { "FixSATA_0400", "FixSATA", FIX_SATA },
+    { "FixFirewire_0800", "FixFirewire", FIX_FIREWIRE },
+    { "FixUSB_1000", "FixUSB", FIX_USB },
+    { "FixLAN_2000", "FixLAN", FIX_LAN },
+    { "FixAirport_4000", "FixAirport", FIX_WIFI },
+    { "FixHDA_8000", "FixHDA", FIX_HDA },
+    { "FixDarwin7_10000", "FixDarwin7", FIX_DARWIN },
+    { "FIX_RTC_20000", "FixRTC", FIX_RTC },
+    { "FIX_TMR_40000", "FixTMR", FIX_TMR },
+    { "AddIMEI_80000", "AddIMEI", FIX_IMEI },
+    { "FIX_INTELGFX_100000", "FixIntelGfx", FIX_INTELGFX },
+    { "FIX_WAK_200000", "FixWAK", FIX_WAK },
+    { "DeleteUnused_400000", "DeleteUnused", FIX_UNUSED },
+    { "FIX_ADP1_800000", "FixADP1", FIX_ADP1 },
+    { "AddPNLF_1000000", "AddPNLF", FIX_PNLF },
+    { "FIX_S3D_2000000", "FixS3D", FIX_S3D },
+    { "FIX_ACST_4000000", "FixACST", FIX_ACST },
+    { "AddHDMI_8000000", "AddHDMI", FIX_HDMI },
+    { "FixRegions_10000000", "FixRegions", FIX_REGIONS },
+    { "FixHeaders_20000000", "FixHeaders", FIX_HEADERS },
+    { NULL, "FixMutex", FIX_MUTEX }
+};
+
 
 /*
  VOID __inline WaitForSts(VOID) {
@@ -1234,6 +1271,7 @@ FillinKextPatches (IN OUT KERNEL_AND_KEXT_PATCHES *Patches,
         
         Dict = GetProperty (Prop2, "Disabled");
         Patches->BootPatches[Patches->NrBoots].MenuItem.BValue   = !IsPropertyTrue (Dict);
+        Patches->BootPatches[Patches->NrBoots].MenuItem.ItemType = BoolValue;
         
         TmpData    = GetDataSetting (Prop2, "Find", &FindLen);
         TmpPatch   = GetDataSetting (Prop2, "Replace", &ReplaceLen);
@@ -1296,6 +1334,9 @@ IsPatchEnabled (CHAR8 *MatchOSEntry, CHAR8 *CurrOS)
   mos = GetStrArraySeparatedByChar(MatchOSEntry, ',');
   if (!mos) {
     return TRUE; //memory fails -> anyway the patch enabled
+  }
+  if (AsciiStrStr(mos->array[0], "All") != NULL) {
+    return TRUE;
   }
   
   for (i = 0; i < mos->count; ++i) {
@@ -2370,7 +2411,10 @@ GetEarlyUserSettings (
       Prop = GetProperty (DictPointer, "HibernationFixup");
       if (Prop) {
         GlobalConfig.HibernationFixup = IsPropertyTrue (Prop); //t will be set automatically
-      } 
+      }
+      
+      Prop = GetProperty (DictPointer, "SignatureFixup");
+      GlobalConfig.SignatureFixup = IsPropertyTrue (Prop);
       
       //      Prop = GetProperty (DictPointer, "GetLegacyLanAddress");
       //      GetLegacyLanAddress = IsPropertyTrue (Prop);
@@ -3075,55 +3119,94 @@ GetListOfACPI ()
   FreePool(AcpiPath);
 }
 
+CHAR16* GetBundleVersion(CHAR16 *FullName)
+{
+  EFI_STATUS      Status;
+  CHAR16*         CFBundleVersion = NULL;
+  CHAR16*         InfoPlistPath;
+  CHAR8*          InfoPlistPtr = NULL;
+  TagPtr          InfoPlistDict = NULL;
+  TagPtr          Prop = NULL;
+  UINTN           Size;
+
+  InfoPlistPath = PoolPrint(L"%s\\%s", FullName, L"Contents\\Info.plist");
+  Status = egLoadFile (SelfRootDir, InfoPlistPath, (UINT8**)&InfoPlistPtr, &Size);
+  if(!EFI_ERROR(Status)) {
+    Status = ParseXML ((const CHAR8*)InfoPlistPtr, &InfoPlistDict, (UINT32)Size);
+    if(!EFI_ERROR(Status)) {
+      Prop = GetProperty(InfoPlistDict, "CFBundleVersion");
+      if (Prop != NULL && Prop->string != NULL) {
+        CFBundleVersion = PoolPrint (L"%a", Prop->string);
+      }
+    }
+  }
+  if (InfoPlistPtr) {
+    FreePool(InfoPlistPtr);
+  }
+  FreePool(InfoPlistPath);
+  return CFBundleVersion;
+}
+
 VOID GetListOfInjectKext(CHAR16 *KextPath)
 {
+
   REFIT_DIR_ITER  DirIter;
   EFI_FILE_INFO*  DirEntry;
   SIDELOAD_KEXT*  mKext;
   SIDELOAD_KEXT*  mPlugInKext;
+  CHAR16*         FullName;
   CHAR16*         FullPath = PoolPrint(L"%s\\KEXTS\\%s", OEMPath, KextPath);
+  REFIT_DIR_ITER  PlugInsIter;
+  EFI_FILE_INFO   *PlugInEntry;
+  CHAR16*         PlugInsPath;
+  CHAR16*         PlugInsName;
 
   DirIterOpen(SelfRootDir, FullPath, &DirIter);
   while (DirIterNext(&DirIter, 1, L"*.kext", &DirEntry)) {
-    CHAR16  FullName[256];
     if (DirEntry->FileName[0] == L'.' || StrStr(DirEntry->FileName, L".kext") == NULL) {
       continue;
     }
-   UnicodeSPrint(FullName, 512, L"%s\\%s", FullPath, DirEntry->FileName);
+/*
+    <key>CFBundleVersion</key>
+    <string>8.8.8</string>
+*/
+    FullName = PoolPrint(L"%s\\%s", FullPath, DirEntry->FileName);
+
     mKext = AllocateZeroPool (sizeof(SIDELOAD_KEXT));
     mKext->FileName = PoolPrint(L"%s", DirEntry->FileName);
     mKext->MenuItem.BValue = FALSE;
     mKext->MatchOS = PoolPrint(L"%s", KextPath);
     mKext->Next = InjectKextList;
+    mKext->Version = GetBundleVersion(FullName);
     InjectKextList = mKext;
- //   DBG("Added mKext=%s, MatchOS=%s\n", mKext->FileName, mKext->MatchOS);
+    //   DBG("Added mKext=%s, MatchOS=%s\n", mKext->FileName, mKext->MatchOS);
 
     // Obtain PlugInList
     // Iterate over PlugIns directory
-    REFIT_DIR_ITER  PlugInsIter;
-    EFI_FILE_INFO   *PlugInEntry;
-    CHAR16          PlugInsPath[256];
-
-    UnicodeSPrint(PlugInsPath, 512, L"%s\\%s", FullName, L"Contents\\PlugIns");
+    PlugInsPath = PoolPrint(L"%s\\%s", FullName, L"Contents\\PlugIns");
 
     DirIterOpen(SelfRootDir, PlugInsPath, &PlugInsIter);
     while (DirIterNext(&PlugInsIter, 1, L"*.kext", &PlugInEntry)) {
       if (PlugInEntry->FileName[0] == L'.' || StrStr(PlugInEntry->FileName, L".kext") == NULL) {
         continue;
       }
-
+      PlugInsName = PoolPrint(L"%s\\%s", PlugInsPath, PlugInEntry->FileName);
       mPlugInKext = AllocateZeroPool(sizeof(SIDELOAD_KEXT));
       mPlugInKext->FileName = PoolPrint(L"%s", PlugInEntry->FileName);
       mPlugInKext->MenuItem.BValue = FALSE;
       mPlugInKext->MatchOS = PoolPrint(L"%s", KextPath);
       mPlugInKext->Next    = mKext->PlugInList;
+      mPlugInKext->Version = GetBundleVersion(PlugInsName);
       mKext->PlugInList    = mPlugInKext;
-//      DBG("---| added plugin=%s, MatchOS=%s\n", mPlugInKext->FileName, mPlugInKext->MatchOS);
+      //      DBG("---| added plugin=%s, MatchOS=%s\n", mPlugInKext->FileName, mPlugInKext->MatchOS);
+      FreePool(PlugInsName);
     }
+    FreePool(PlugInsPath);
+    FreePool(FullName);
     DirIterClose(&PlugInsIter);
   }
   DirIterClose(&DirIter);
-  FreePool(KextPath);
+  FreePool(FullPath);
 }
 
 VOID InitKextList()
@@ -3172,7 +3255,6 @@ GetListOfThemes ()
       //DBG("Skip theme: %s\n", DirEntry->FileName);
       continue;
     }
-
     //DBG ("Found theme directory: %s", DirEntry->FileName);
     DBG ("- [%02d]: %s", ThemesNum, DirEntry->FileName);
     ThemeTestPath = PoolPrint (L"EFI\\CLOVER\\themes\\%s", DirEntry->FileName);
@@ -3196,8 +3278,10 @@ GetListOfThemes ()
       FreePool (ThemeTestPath);
     }
     DBG ("\n");
+    if (ThemePtr) {
+      FreePool(ThemePtr);
+    }
   }
-
   DirIterClose (&DirIter);
 }
 
@@ -3988,7 +4072,7 @@ ParseSMBIOSSettings(
       SetDMISettingsForModel (Model, FALSE);
       Default = TRUE;
     } else {
-      //if new model then fill at least as MacPro3,1, except custom ProductName
+      //if new model then fill at least as iMac13,2, except custom ProductName
       // something else?
       SetDMISettingsForModel (iMac132, FALSE);
     }
@@ -4016,38 +4100,31 @@ ParseSMBIOSSettings(
 
     if (((i[1] > '0') && (j[1] == '0')) || ((i[1] >= j[1]) && (i[2] > j[2]))) {
       DBG ("Using latest BiosVersion from clover\n");
-      DBG ("BiosVersion: %a\n", gSettings.RomVersion);
     } else if ((i[1] == j[1]) && (i[2] == j[2])) {
       if (((i[3] > '0') && (j[3] == '0')) || ((i[3] >= j[3]) && (i[4] > j[4]))) {
         DBG ("Using latest BiosVersion from clover\n");
-        DBG ("BiosVersion: %a\n", gSettings.RomVersion);
       } else if ((i[3] == j[3]) && (i[4] == j[4])) {
         if (((i[5] > '0') && (j[5] == '0')) || ((i[5] > '1') && (j[5] == '1')) ||
           ((i[5] > '2') && (j[5] == '2')) || ((i[5] >= j[5]) && (i[6] > j[6]))) {
           DBG ("Using latest BiosVersion from clover\n");
-          DBG ("BiosVersion: %a\n", gSettings.RomVersion);
         } else if ((i[5] == j[5]) && (i[6] == j[6])) {
           DBG ("Found same BiosVersion in clover and config\n");
-          DBG ("BiosVersion: %a\n", gSettings.RomVersion);
         } else {
           AsciiStrCpyS (gSettings.RomVersion, 64, Prop->string);
           DBG ("Using latest BiosVersion from config\n");
-          DBG ("BiosVersion: %a\n", gSettings.RomVersion);
         }
       } else {
         AsciiStrCpyS (gSettings.RomVersion, 64, Prop->string);
         DBG ("Using latest BiosVersion from config\n");
-        DBG ("BiosVersion: %a\n", gSettings.RomVersion);
       }
     } else {
       AsciiStrCpyS (gSettings.RomVersion, 64, Prop->string);
       DBG ("Using latest BiosVersion from config\n");
-      DBG ("BiosVersion: %a\n", gSettings.RomVersion);
     }
   } else {
     DBG ("BiosVersion: not set, Using BiosVersion from clover\n");
-    DBG ("BiosVersion: %a\n", gSettings.RomVersion);
   }
+  DBG ("BiosVersion: %a\n", gSettings.RomVersion);
 
   Prop1 = GetProperty (DictPointer, "BiosReleaseDate");
   if (Prop1 != NULL) {
@@ -4061,7 +4138,6 @@ ParseSMBIOSSettings(
           ((i[3] > j[3]) && (i[4] > j[4]))) {
           //DBG ("Found old BiosReleaseDate from config\n");
           //DBG ("Using latest BiosReleaseDate from clover\n");
-          DBG ("BiosReleaseDate: %a\n", gSettings.ReleaseDate);
         } else {
           i = gSettings.RomVersion;
 
@@ -4076,14 +4152,12 @@ ParseSMBIOSSettings(
             //DBG ("The date in BiosVersion matches BiosReleaseDate!\n");
             AsciiStrCpyS (gSettings.ReleaseDate, 64, Prop1->string);
             //DBG ("Using latest BiosReleaseDate from config\n");
-            DBG ("BiosReleaseDate: %a\n", gSettings.ReleaseDate);
           } else {
             //DBG ("BiosReleaseDate: %a from config\n", Prop1->string);
             //DBG ("The date in BiosReleaseDate from config doesn't match BiosVersion!\n");
             AsciiSPrint (Res1, 9, "%c%c/%c%c/%c%c\n", i[3], i[4], i[5], i[6], i[1], i[2]);
             AsciiStrCpyS (gSettings.ReleaseDate, 64,     Res1);
             //DBG ("Using the date of used BiosVersion\n");
-            DBG ("BiosReleaseDate: %a\n", gSettings.ReleaseDate);
           }
         }
       } else if ((AsciiStrLen(i) == 8) && (AsciiStrLen(j) == 10)) {
@@ -4092,7 +4166,6 @@ ParseSMBIOSSettings(
           ((i[3] > j[3]) && (i[4] > j[4]))) {
           //DBG ("Found old BiosReleaseDate from config\n");
           //DBG ("Using latest BiosReleaseDate from clover\n");
-          DBG ("BiosReleaseDate: %a\n", gSettings.ReleaseDate);
         } else {
           i = gSettings.RomVersion;
 
@@ -4108,14 +4181,12 @@ ParseSMBIOSSettings(
             AsciiSPrint (Res1, 9, "%c%c/%c%c/%c%c\n", j[0], j[1], j[3], j[4], j[8], j[9]);
             AsciiStrCpyS (gSettings.ReleaseDate, 64,     Res1);
             //DBG ("Using latest BiosReleaseDate from config, Found wrong date format and fixed it\n");
-            DBG ("BiosReleaseDate: %a\n", gSettings.ReleaseDate);
           } else {
             //DBG ("BiosReleaseDate: %a from config\n", Prop1->string);
             //DBG ("The date in BiosReleaseDate from config doesn't match BiosVersion\n");
             AsciiSPrint (Res1, 9, "%c%c/%c%c/%c%c\n", i[3], i[4], i[5], i[6], i[1], i[2]);
             AsciiStrCpyS (gSettings.ReleaseDate, 64,     Res1);
             //DBG ("Using the date of used BiosVersion\n");
-            DBG ("BiosReleaseDate: %a\n", gSettings.ReleaseDate);
           }
         }
       } else if ((AsciiStrLen(i) == 10) && (AsciiStrLen(j) == 10)) {
@@ -4124,7 +4195,6 @@ ParseSMBIOSSettings(
           ((i[3] > j[3]) && (i[4] > j[4]))) {
           //DBG ("Found old BiosReleaseDate from config\n");
           //DBG ("Using latest BiosReleaseDate from clover\n");
-          DBG ("BiosReleaseDate: %a\n", gSettings.ReleaseDate);
         } else {
           i = gSettings.RomVersion;
 
@@ -4139,14 +4209,12 @@ ParseSMBIOSSettings(
             //DBG ("The date in BiosVersion matches BiosReleaseDate!\n");
             AsciiStrCpyS (gSettings.ReleaseDate, 64, Prop1->string);
             //DBG ("Using latest BiosReleaseDate from config\n");
-            DBG ("BiosReleaseDate: %a\n", gSettings.ReleaseDate);
           } else {
             //DBG ("BiosReleaseDate: %a from config\n", Prop1->string);
             //DBG ("The date in BiosReleaseDate from config doesn't match BiosVersion!\n");
             AsciiSPrint (Res2, 11, "%c%c/%c%c/20%c%c\n", i[3], i[4], i[5], i[6], i[1], i[2]);
             AsciiStrCpyS (gSettings.ReleaseDate, 64,     Res2);
             //DBG ("Using the date of used BiosVersion\n");
-            DBG ("BiosReleaseDate: %a\n", gSettings.ReleaseDate);
           }
         }
       } else if ((AsciiStrLen(i) == 10) && (AsciiStrLen(j) == 8)) {
@@ -4155,7 +4223,6 @@ ParseSMBIOSSettings(
           ((i[3] > j[3]) && (i[4] > j[4]))) {
           //DBG ("Found old BiosReleaseDate from config\n");
           //DBG ("Using latest BiosReleaseDate from clover\n");
-          DBG ("BiosReleaseDate: %a\n", gSettings.ReleaseDate);
         } else {
           i = gSettings.RomVersion;
 
@@ -4171,14 +4238,12 @@ ParseSMBIOSSettings(
             AsciiSPrint (Res2, 11, "%c%c/%c%c/20%c%c\n", j[0], j[1], j[3], j[4], j[6], j[7]);
             AsciiStrCpyS (gSettings.ReleaseDate, 64,     Res2);
             //DBG ("Using latest BiosReleaseDate from config, Found wrong date format and fixed it\n");
-            DBG ("BiosReleaseDate: %a\n", gSettings.ReleaseDate);
           } else {
             //DBG ("BiosReleaseDate: %a from config\n", Prop1->string);
             //DBG ("The date in BiosReleaseDate from config doesn't match BiosVersion\n");
             AsciiSPrint (Res2, 11, "%c%c/%c%c/20%c%c\n", i[3], i[4], i[5], i[6], i[1], i[2]);
             AsciiStrCpyS (gSettings.ReleaseDate, 64,     Res2);
             //DBG ("Using the date of used BiosVersion\n");
-            DBG ("BiosReleaseDate: %a\n", gSettings.ReleaseDate);
           }
         }
       } else {
@@ -4196,22 +4261,18 @@ ParseSMBIOSSettings(
             AsciiSPrint (Res1, 9, "%c%c/%c%c/%c%c\n", j[3], j[4], j[5], j[6], j[1], j[2]);
             AsciiStrCpyS (gSettings.ReleaseDate, 64,     Res1);
             //DBG ("Using the date of used BiosVersion\n");
-            DBG ("BiosReleaseDate: %a\n", gSettings.ReleaseDate);
           } else if ((AsciiStrLen(i) == 10)) {
             AsciiSPrint (Res2, 11, "%c%c/%c%c/20%c%c\n", j[3], j[4], j[5], j[6], j[1], j[2]);
             AsciiStrCpyS (gSettings.ReleaseDate, 64,     Res2);
             //DBG ("Using the date of used BiosVersion\n");
-            DBG ("BiosReleaseDate: %a\n", gSettings.ReleaseDate);
           }
         } else {
           //DBG ("Using BiosReleaseDate from clover\n");
-          DBG ("BiosReleaseDate: %a\n", gSettings.ReleaseDate);
         }
       }
     } else {
       //DBG ("BiosReleaseDate: set to %a from config, Ignore BiosReleaseDate\n", Prop1->string);
       //DBG ("Using BiosReleaseDate from clover\n");
-      DBG ("BiosReleaseDate: %a\n", gSettings.ReleaseDate);
     }
   } else {
     if (Prop != NULL) {
@@ -4227,18 +4288,16 @@ ParseSMBIOSSettings(
         AsciiSPrint (Res1, 9, "%c%c/%c%c/%c%c\n", j[3], j[4], j[5], j[6], j[1], j[2]);
         AsciiStrCpyS (gSettings.ReleaseDate, 64,     Res1);
         //DBG ("BiosReleaseDate: not set, Using the date of used BiosVersion\n");
-        DBG ("BiosReleaseDate: %a\n", gSettings.ReleaseDate);
       } else if ((AsciiStrLen(i) == 10)) {
         AsciiSPrint (Res2, 11, "%c%c/%c%c/20%c%c\n", j[3], j[4], j[5], j[6], j[1], j[2]);
         AsciiStrCpyS (gSettings.ReleaseDate, 64,     Res2);
         //DBG ("BiosReleaseDate: not set, Using the date of used BiosVersion\n");
-        DBG ("BiosReleaseDate: %a\n", gSettings.ReleaseDate);
       }
     } else {
       //DBG ("BiosReleaseDate: not set, Using BiosReleaseDate from clover\n");
-      DBG ("BiosReleaseDate: %a\n", gSettings.ReleaseDate);
     }
   }
+  DBG ("BiosReleaseDate: %a\n", gSettings.ReleaseDate);
 
   // Check for FirmwareFeatures and FirmwareFeaturesMask by Sherlocks
   Prop = GetProperty (DictPointer, "FirmwareFeatures");
@@ -4304,7 +4363,7 @@ ParseSMBIOSSettings(
 
   Prop = GetProperty (DictPointer, "PlatformFeature");
   if (Prop != NULL) {
-    gPlatformFeature = (UINT64)GetPropertyInteger(Prop, gPlatformFeature);
+    gPlatformFeature = (UINT64)GetPropertyInteger(Prop, (INTN)gPlatformFeature);
 /*
     if (PF == gPlatformFeature) {
       DBG ("Found same PlatformFeature in clover and config\n");
@@ -4496,6 +4555,9 @@ GetUserSettings(
           gSettings.InjectNVidia     = FALSE;
         }
       }
+
+      Prop = GetProperty (DictPointer, "RadeonDeInit");
+      gSettings.DeInit = IsPropertyTrue (Prop);
 
       Prop = GetProperty (DictPointer, "VRAM");
       gSettings.VRAM = (UINTN)GetPropertyInteger(Prop, (INTN)gSettings.VRAM); //Mb 
@@ -4742,31 +4804,31 @@ GetUserSettings(
                 DEV_PROPERTY *Property = &gSettings.AddProperties[Index];
 
                 if (AsciiStriCmp (Prop2->string,        "ATI") == 0) {
-                  Property->Device = DEV_ATI;
+                  Property->Device = (UINT32)DEV_ATI;
                 } else if (AsciiStriCmp (Prop2->string, "NVidia") == 0) {
-                  Property->Device = DEV_NVIDIA;
+                  Property->Device = (UINT32)DEV_NVIDIA;
                 } else if (AsciiStriCmp (Prop2->string, "IntelGFX") == 0) {
-                  Property->Device = DEV_INTEL;
+                  Property->Device = (UINT32)DEV_INTEL;
                 } else if (AsciiStriCmp (Prop2->string, "LAN") == 0) {
-                  Property->Device = DEV_LAN;
+                  Property->Device = (UINT32)DEV_LAN;
                 } else if (AsciiStriCmp (Prop2->string, "WIFI") == 0) {
-                  Property->Device = DEV_WIFI;
+                  Property->Device = (UINT32)DEV_WIFI;
                 } else if (AsciiStriCmp (Prop2->string, "Firewire") == 0) {
-                  Property->Device = DEV_FIREWIRE;
+                  Property->Device = (UINT32)DEV_FIREWIRE;
                 } else if (AsciiStriCmp (Prop2->string, "SATA") == 0) {
-                  Property->Device = DEV_SATA;
+                  Property->Device = (UINT32)DEV_SATA;
                 } else if (AsciiStriCmp (Prop2->string, "IDE") == 0) {
-                  Property->Device = DEV_IDE;
+                  Property->Device = (UINT32)DEV_IDE;
                 } else if (AsciiStriCmp (Prop2->string, "HDA") == 0) {
-                  Property->Device = DEV_HDA;
+                  Property->Device = (UINT32)DEV_HDA;
                 } else if (AsciiStriCmp (Prop2->string, "HDMI") == 0) {
-                  Property->Device = DEV_HDMI;
+                  Property->Device = (UINT32)DEV_HDMI;
                 } else if (AsciiStriCmp (Prop2->string, "LPC") == 0) {
-                  Property->Device = DEV_LPC;
+                  Property->Device = (UINT32)DEV_LPC;
                 } else if (AsciiStriCmp (Prop2->string, "SmBUS") == 0) {
-                  Property->Device = DEV_SMBUS;
+                  Property->Device = (UINT32)DEV_SMBUS;
                 } else if (AsciiStriCmp (Prop2->string, "USB") == 0) {
-                  Property->Device = DEV_USB;
+                  Property->Device = (UINT32)DEV_USB;
                 } else {
                   DBG (" unknown device, ignored\n", i);
                   continue;
@@ -5049,168 +5111,20 @@ GetUserSettings(
 
         Prop = GetProperty (Dict2, "Fixes");
         if (Prop != NULL) {
- //         DBG ("Fixes will override DSDT fix mask %08x!\n", gSettings.FixDsdt);
-
+          UINTN Index;
+          //         DBG ("Fixes will override DSDT fix mask %08x!\n", gSettings.FixDsdt);
           if (Prop->type == kTagTypeDict) {
             gSettings.FixDsdt = 0;
-
-            Prop2 = GetProperty (Prop, "AddDTGP_0001");
-            if (Prop2 != NULL && IsPropertyTrue (Prop2)) {
-              gSettings.FixDsdt |= FIX_DTGP;
+            for (Index = 0; Index < sizeof(FixesConfig)/sizeof(FixesConfig[0]); Index++) {
+              Prop2 = GetProperty(Prop, FixesConfig[Index].newName);
+              if (!Prop2 && FixesConfig[Index].oldName) {
+                Prop2 = GetProperty(Prop, FixesConfig[Index].oldName);
+              }
+              if (IsPropertyTrue(Prop2)) {
+                gSettings.FixDsdt |= FixesConfig[Index].bitData;
+              }
             }
-
-            Prop2 = GetProperty (Prop, "FixDarwin_0002");
-            if (Prop2 != NULL && IsPropertyTrue (Prop2)) {
-              gSettings.FixDsdt |= FIX_WARNING;
-            }
-
-            Prop2 = GetProperty (Prop, "FixShutdown_0004");
-            if (Prop2 != NULL && IsPropertyTrue (Prop2)) {
-              gSettings.FixDsdt |= FIX_SHUTDOWN;
-            }
-
-            Prop2 = GetProperty (Prop, "AddMCHC_0008");
-            if (Prop2 != NULL && IsPropertyTrue (Prop2)) {
-              gSettings.FixDsdt |= FIX_MCHC;
-            }
-
-            Prop2 = GetProperty (Prop, "FixHPET_0010");
-            if (Prop2 != NULL && IsPropertyTrue (Prop2)) {
-              gSettings.FixDsdt |= FIX_HPET;
-            }
-
-            Prop2 = GetProperty (Prop, "FakeLPC_0020");
-            if (Prop2 != NULL && IsPropertyTrue (Prop2)) {
-              gSettings.FixDsdt |= FIX_LPC;
-            }
-
-            Prop2 = GetProperty (Prop, "FixIPIC_0040");
-            if (Prop2 != NULL && IsPropertyTrue (Prop2)) {
-              gSettings.FixDsdt |= FIX_IPIC;
-            }
-
-            Prop2 = GetProperty (Prop, "FixSBUS_0080");
-            if (Prop2 != NULL && IsPropertyTrue (Prop2)) {
-              gSettings.FixDsdt |= FIX_SBUS;
-            }
-
-            Prop2 = GetProperty (Prop, "FixDisplay_0100");
-            if (Prop2 != NULL && IsPropertyTrue (Prop2)) {
-              gSettings.FixDsdt |= FIX_DISPLAY;
-            }
-
-            Prop2 = GetProperty (Prop, "FixIDE_0200");
-            if (Prop2 != NULL && IsPropertyTrue (Prop2)) {
-              gSettings.FixDsdt |= FIX_IDE;
-            }
-
-            Prop2 = GetProperty (Prop, "FixSATA_0400");
-            if (Prop2 != NULL && IsPropertyTrue (Prop2)) {
-              gSettings.FixDsdt |= FIX_SATA;
-            }
-
-            Prop2 = GetProperty (Prop, "FixFirewire_0800");
-            if (Prop2 != NULL && IsPropertyTrue (Prop2)) {
-              gSettings.FixDsdt |= FIX_FIREWIRE;
-            }
-
-            Prop2 = GetProperty (Prop, "FixUSB_1000");
-            if (Prop2 != NULL && IsPropertyTrue (Prop2)) {
-              gSettings.FixDsdt |= FIX_USB;
-            }
-
-            Prop2 = GetProperty (Prop, "FixLAN_2000");
-            if (Prop2 != NULL && IsPropertyTrue (Prop2)) {
-              gSettings.FixDsdt |= FIX_LAN;
-            }
-
-            Prop2 = GetProperty (Prop, "FixAirport_4000");
-            if (Prop2 != NULL && IsPropertyTrue (Prop2)) {
-              gSettings.FixDsdt |= FIX_WIFI;
-            }
-
-            Prop2 = GetProperty (Prop, "FixHDA_8000");
-            if (Prop2 != NULL && IsPropertyTrue (Prop2)) {
-              gSettings.FixDsdt |= FIX_HDA;
-            }
-
-            Prop2 = GetProperty (Prop, "FixDarwin7_10000");
-            if (Prop2 != NULL && IsPropertyTrue (Prop2)) {
-              gSettings.FixDsdt |= FIX_DARWIN;
-            }
-
-            Prop2 = GetProperty (Prop, "FIX_RTC_20000");
-            if (Prop2 != NULL && IsPropertyTrue (Prop2)) {
-              gSettings.FixDsdt |= FIX_RTC;
-            }
-
-            Prop2 = GetProperty (Prop, "FIX_TMR_40000");
-            if (Prop2 != NULL && IsPropertyTrue (Prop2)) {
-              gSettings.FixDsdt |= FIX_TMR;
-            }
-
-            Prop2 = GetProperty (Prop, "AddIMEI_80000");
-            if (Prop2 != NULL && IsPropertyTrue (Prop2)) {
-              gSettings.FixDsdt |= FIX_IMEI;
-            }
-
-            Prop2 = GetProperty (Prop, "FIX_INTELGFX_100000");
-            if (Prop2 != NULL && IsPropertyTrue (Prop2)) {
-              gSettings.FixDsdt |= FIX_INTELGFX;
-            }
-
-            Prop2 = GetProperty (Prop, "FIX_WAK_200000");
-            if (Prop2 != NULL && IsPropertyTrue (Prop2)) {
-              gSettings.FixDsdt |= FIX_WAK;
-            }
-
-            Prop2 = GetProperty (Prop, "DeleteUnused_400000");
-            if (Prop2 != NULL && IsPropertyTrue (Prop2)) {
-              gSettings.FixDsdt |= FIX_UNUSED;
-            }
-
-            Prop2 = GetProperty (Prop, "FIX_ADP1_800000");
-            if (Prop2 != NULL && IsPropertyTrue (Prop2)) {
-              gSettings.FixDsdt |= FIX_ADP1;
-            }
-
-            Prop2 = GetProperty (Prop, "AddPNLF_1000000");
-            if (Prop2 != NULL && IsPropertyTrue (Prop2)) {
-              gSettings.FixDsdt |= FIX_PNLF;
-            }
-
-            Prop2 = GetProperty (Prop, "FIX_S3D_2000000");
-            if (Prop2 != NULL && IsPropertyTrue (Prop2)) {
-              gSettings.FixDsdt |= FIX_S3D;
-            }
-
-            Prop2 = GetProperty (Prop, "FIX_ACST_4000000");
-            if (Prop2 != NULL && IsPropertyTrue (Prop2)) {
-              gSettings.FixDsdt |= FIX_ACST;
-            }
-
-            Prop2 = GetProperty (Prop, "AddHDMI_8000000");
-            if (Prop2 != NULL && IsPropertyTrue (Prop2)) {
-              gSettings.FixDsdt |= FIX_HDMI;
-            }
-
-            Prop2 = GetProperty (Prop, "FixRegions_10000000");
-            if (Prop2 != NULL && IsPropertyTrue (Prop2)) {
-              gSettings.FixDsdt |= FIX_REGIONS;
-            }
-
-            Prop2 = GetProperty (Prop, "FixHeaders_20000000");
-            if (Prop2 != NULL && IsPropertyTrue (Prop2)) {
-              gSettings.FixDsdt |= FIX_HEADERS;
-            }
-
-            /*
-            Prop2 = GetProperty (Prop, "NewWay_80000000");
-            if (Prop2 != NULL && IsPropertyTrue (Prop2)) {
-              gSettings.FixDsdt |= FIX_NEW_WAY;
-            } */
           }
-
         }
         DBG (" - final DSDT Fix mask=%08x\n", gSettings.FixDsdt);
 
@@ -5221,6 +5135,7 @@ GetUserSettings(
             gSettings.PatchDsdtNum      = (UINT32)Count;
             gSettings.PatchDsdtFind     = AllocateZeroPool (Count * sizeof(UINT8*));
             gSettings.PatchDsdtReplace  = AllocateZeroPool (Count * sizeof(UINT8*));
+            gSettings.PatchDsdtTgt      = AllocateZeroPool (Count * sizeof(UINT8*));
             gSettings.LenToFind         = AllocateZeroPool (Count * sizeof(UINT32));
             gSettings.LenToReplace      = AllocateZeroPool (Count * sizeof(UINT32));
             gSettings.PatchDsdtLabel    = AllocateZeroPool (Count * sizeof(UINT8*));
@@ -5255,19 +5170,18 @@ GetUserSettings(
               
               FreePool(DSDTPatchesLabel);
 
-              gSettings.PatchDsdtMenuItem[i].BValue = TRUE;
               Prop3 = GetProperty (Prop2, "Disabled");
-              if ((Prop3 != NULL) && IsPropertyTrue (Prop3)) {
-                gSettings.PatchDsdtMenuItem[i].BValue = FALSE;
-              }
+              gSettings.PatchDsdtMenuItem[i].BValue = !IsPropertyTrue (Prop3);
 
               //DBG (" DSDT bin patch #%d ", i);
-              gSettings.PatchDsdtFind[i]    = GetDataSetting (Prop2, "Find",    &Size);
+              gSettings.PatchDsdtFind[i]    = GetDataSetting (Prop2, "Find",     &Size);
               DBG (" lenToFind: %d", Size);
               gSettings.LenToFind[i]        = (UINT32)Size;
-              gSettings.PatchDsdtReplace[i] = GetDataSetting (Prop2, "Replace", &Size);
-              DBG (", lenToReplace: %d\n", Size);
+              gSettings.PatchDsdtReplace[i] = GetDataSetting (Prop2, "Replace",  &Size);
+              DBG (", lenToReplace: %d", Size);
               gSettings.LenToReplace[i]     = (UINT32)Size;
+              gSettings.PatchDsdtTgt[i]     = GetDataSetting (Prop2, "TgtBridge", &Size);
+              DBG (", Target Bridge: %a\n", gSettings.PatchDsdtTgt[i]);
               if (!gSettings.PatchDsdtMenuItem[i].BValue) {
                 DBG("  patch disabled at config\n");
               }
@@ -5372,20 +5286,48 @@ GetUserSettings(
           if (IsPropertyTrue (Prop2)) {
             gSettings.GeneratePStates = TRUE;
             gSettings.GenerateCStates = TRUE;
+            gSettings.GenerateAPSN = TRUE;
+            gSettings.GenerateAPLF = TRUE;
+            gSettings.GeneratePluginType = TRUE;
+
           } else if (IsPropertyFalse (Prop2)) {
             gSettings.GeneratePStates = FALSE;
             gSettings.GenerateCStates = FALSE;
-          } else if (Prop2->type == kTagTypeDict) {
-            Prop                      = GetProperty (Prop2, "PStates");
-            gSettings.GeneratePStates = IsPropertyTrue (Prop);
+            gSettings.GenerateAPSN = FALSE;
+            gSettings.GenerateAPLF = FALSE;
+            gSettings.GeneratePluginType = FALSE;
 
-            Prop                      = GetProperty (Prop2, "CStates");
+          } else if (Prop2->type == kTagTypeDict) {
+            Prop = GetProperty (Prop2, "PStates");
+            gSettings.GeneratePStates = IsPropertyTrue (Prop);
+            gSettings.GenerateAPSN = gSettings.GeneratePStates;
+            gSettings.GenerateAPLF = gSettings.GeneratePStates;
+            gSettings.GeneratePluginType = gSettings.GeneratePStates;
+            Prop = GetProperty (Prop2, "CStates");
             gSettings.GenerateCStates = IsPropertyTrue (Prop);
+            Prop = GetProperty (Prop2, "APSN");
+            if (Prop) {
+              gSettings.GenerateAPSN = IsPropertyTrue (Prop);
+            }
+            Prop = GetProperty (Prop2, "APLF");
+            if (Prop) {
+              gSettings.GenerateAPLF = IsPropertyTrue (Prop);
+            }
+            Prop = GetProperty (Prop2, "PluginType");
+            if (Prop) {
+              gSettings.GeneratePluginType = IsPropertyTrue (Prop);
+            }
           }
         }
 
         Prop = GetProperty (Dict2, "DropOem");
         gSettings.DropSSDT  = IsPropertyTrue (Prop);
+
+        Prop = GetProperty (Dict2, "NoOemTableId"); // to disable OEM table ID on ACPI/orgin/SSDT file names
+        gSettings.NoOemTableId = IsPropertyTrue (Prop);
+
+        Prop = GetProperty (Dict2, "NoDynamicExtract"); // to disable extracting child SSDTs
+        gSettings.NoDynamicExtract = IsPropertyTrue (Prop);
 
         Prop = GetProperty (Dict2, "UseSystemIO");
         gSettings.EnableISS = IsPropertyTrue (Prop);
@@ -5448,8 +5390,8 @@ GetUserSettings(
         }
       }
 
-      Prop               = GetProperty (DictPointer, "DropMCFG");
-      gSettings.DropMCFG = IsPropertyTrue (Prop);
+ //     Prop               = GetProperty (DictPointer, "DropMCFG");
+ //     gSettings.DropMCFG = IsPropertyTrue (Prop);
 
       Prop = GetProperty (DictPointer, "ResetAddress");
       if (Prop) {
@@ -5503,6 +5445,9 @@ GetUserSettings(
           }
         }
       }
+      
+      Prop = GetProperty (DictPointer, "AutoMerge");
+      gSettings.AutoMerge  = IsPropertyTrue (Prop);
 
       Prop = GetProperty (DictPointer, "DisabledAML");
       if (Prop) {
@@ -5966,6 +5911,7 @@ GetUserSettings(
     if (gBootChanged) {
       DictPointer = GetProperty (Dict, "KernelAndKextPatches");
       if (DictPointer != NULL) {
+        DBG("refill kernel patches bcoz gBootChanged\n");
         FillinKextPatches ((KERNEL_AND_KEXT_PATCHES *)(((UINTN)&gSettings) + OFFSET_OF(SETTINGS_DATA, KernelAndKextPatches)), DictPointer);
       }
     } else {
@@ -5988,6 +5934,25 @@ GetUserSettings(
   }
   //DBG ("config.plist read and return %r\n", Status);
   return EFI_SUCCESS;
+}
+
+static CHAR8 *SearchString (
+  IN  CHAR8       *Source,
+  IN  UINT64      SourceSize,
+  IN  CHAR8       *Search,
+  IN  UINTN       SearchSize
+  )
+{
+  CHAR8 *End = Source + SourceSize;
+
+  while (Source < End) {
+    if (CompareMem(Source, Search, SearchSize) == 0) {
+      return Source;
+    } else {
+      Source++;
+    }
+  }
+  return NULL;
 }
 
 CHAR8 *GetOSVersion(IN LOADER_ENTRY *Entry)
@@ -6073,6 +6038,61 @@ CHAR8 *GetOSVersion(IN LOADER_ENTRY *Entry)
             }
           }
         }
+      } else {
+        InstallerPlist = L"\\macOS Install Data\\Locked Files\\Boot Files\\SystemVersion.plist";
+        if (!FileExists (Entry->Volume->RootDir, InstallerPlist)) {
+          InstallerPlist = L"\\com.apple.boot.R\\SystemVersion.plist";
+        }
+        if (FileExists (Entry->Volume->RootDir, InstallerPlist)) {
+          Status = egLoadFile (Entry->Volume->RootDir, InstallerPlist, (UINT8 **)&PlistBuffer, &PlistLen);
+          if (!EFI_ERROR (Status) && PlistBuffer != NULL && ParseXML (PlistBuffer, &Dict, 0) == EFI_SUCCESS) {
+            Prop = GetProperty (Dict, "ProductVersion");
+            if (Prop != NULL && Prop->string != NULL && Prop->string[0] != '\0') {
+              OSVersion = AllocateCopyPool (AsciiStrSize (Prop->string), Prop->string);
+            }
+          }
+        } else {
+          // read ProductVersion/BuildVersion from ia.log
+          // implemented by Sherlocks
+          CHAR8  *i, *fileBuffer, *targetString;
+          CHAR8  *Res1 = AllocateZeroPool(5), *Res2 = AllocateZeroPool(7), *Res3 = AllocateZeroPool(6), *Res4 = AllocateZeroPool(7);
+          UINTN  fileLen = 0;
+          CHAR16 *InstallerLog = L"\\Mac OS X Install Data\\ia.log";
+          if (!FileExists (Entry->Volume->RootDir, InstallerLog)) {
+            InstallerLog = L"\\OS X Install Data\\ia.log";
+          }
+          if (FileExists (Entry->Volume->RootDir, InstallerLog)) {
+            Status = egLoadFile(Entry->Volume->RootDir, InstallerLog, (UINT8 **)&fileBuffer, &fileLen);
+            if (!EFI_ERROR (Status)) {
+              targetString = (CHAR8*) AllocateZeroPool(fileLen+1);
+              CopyMem((VOID*)targetString, (VOID*)fileBuffer, fileLen);
+              i = SearchString(targetString, fileLen, "Running OS Build: Mac OS X ", 27);
+              if (i[31] == ' ') {
+                AsciiSPrint (Res1, 5, "%c%c.%c\n", i[27], i[28], i[30]);
+                OSVersion = AllocateCopyPool (AsciiStrSize (Res1), Res1);
+                if (i[38] == ')') {
+                  AsciiSPrint (Res3, 6, "%c%c%c%c%c\n", i[33], i[34], i[35], i[36], i[37]);
+                  Entry->BuildVersion = AllocateCopyPool (AsciiStrSize (Res3), Res3);
+                } else if (i[39] == ')') {
+                  AsciiSPrint (Res4, 7, "%c%c%c%c%c%c\n", i[33], i[34], i[35], i[36], i[37], i[38]);
+                  Entry->BuildVersion = AllocateCopyPool (AsciiStrSize (Res4), Res4);
+                }
+              } else if (i[31] == '.') {
+                AsciiSPrint (Res2, 7, "%c%c.%c.%c\n", i[27], i[28], i[30], i[32]);
+                OSVersion = AllocateCopyPool (AsciiStrSize (Res2), Res2);
+                if (i[40] == ')') {
+                  AsciiSPrint (Res3, 6, "%c%c%c%c%c\n", i[35], i[36], i[37], i[38], i[39]);
+                  Entry->BuildVersion = AllocateCopyPool (AsciiStrSize (Res3), Res3);
+                } else if (i[41] == ')') {
+                  AsciiSPrint (Res4, 7, "%c%c%c%c%c%c\n", i[35], i[36], i[37], i[38], i[39], i[40]);
+                  Entry->BuildVersion = AllocateCopyPool (AsciiStrSize (Res4), Res4);
+                }
+              }
+              FreePool(fileBuffer);
+              FreePool(targetString);
+            }
+          }
+        }
       }
     }
   }
@@ -6118,7 +6138,7 @@ CHAR16
   if (OSVersion == NULL) {
     OSIconName = L"mac";
   } else if (AsciiStrStr (OSVersion, "10.13") != 0) {
-      // High Sierra
+    // High Sierra
     OSIconName = L"hsierra,mac";
   } else if (AsciiStrStr (OSVersion, "10.12") != 0) {
     // Sierra
@@ -6179,13 +6199,18 @@ GetRootUUID (IN  REFIT_VOLUME *Volume)
   }
 
   SystemPlistR = L"\\com.apple.boot.R\\Library\\Preferences\\SystemConfiguration\\com.apple.Boot.plist";
-  HasRock      = FileExists (Volume->RootDir,     SystemPlistR);
+  if (FileExists (Volume->RootDir, SystemPlistR)) {
+    HasRock      = FileExists (Volume->RootDir,     SystemPlistR);
+  } else {
+    SystemPlistR = L"\\com.apple.boot.R\\com.apple.Boot.plist";
+    HasRock      = FileExists (Volume->RootDir,     SystemPlistR);
+  }
 
   SystemPlistP = L"\\com.apple.boot.P\\Library\\Preferences\\SystemConfiguration\\com.apple.Boot.plist";
   HasPaper     = FileExists (Volume->RootDir,    SystemPlistP);
 
   SystemPlistS = L"\\com.apple.boot.S\\Library\\Preferences\\SystemConfiguration\\com.apple.Boot.plist";
-  HasScissors  = FileExists (Volume->RootDir, SystemPlistS);
+  HasScissors  = FileExists (Volume->RootDir,    SystemPlistS);
 
   PlistBuffer = NULL;
   // Playing Rock, Paper, Scissors to chose which settings to load.
@@ -6706,17 +6731,21 @@ SetDevices (
                       break;
                     }
                   }
-      /*            if (gSettings.DeInit) {
+                  if (gSettings.DeInit) {
                     for (j = 0; j < 4; j++) {
                       if (gGraphics[j].Handle == PCIdevice.DeviceHandle) {
-                 //       *(UINT32*)(gGraphics[j].Mmio + 0x48) = 0;
-                 //       *(UINT32*)(gGraphics[j].Mmio + 0x4C) = 0;
-                        *(UINT32*)(gGraphics[j].Mmio + R600_BIOS_0_SCRATCH) = 0x00810000;
+                        *(UINT32*)(gGraphics[j].Mmio + 0x6848) = 0; //EVERGREEN_GRPH_FLIP_CONTROL, 1<<0 SURFACE_UPDATE_H_RETRACE_EN
+                        *(UINT32*)(gGraphics[j].Mmio + 0x681C) = 0; //EVERGREEN_GRPH_PRIMARY_SURFACE_ADDRESS_HIGH
+                        *(UINT32*)(gGraphics[j].Mmio + 0x6820) = 0; //EVERGREEN_GRPH_SECONDARY_SURFACE_ADDRESS_HIGH
+                        *(UINT32*)(gGraphics[j].Mmio + 0x6808) = 0; //EVERGREEN_GRPH_LUT_10BIT_BYPASS_CONTROL, EVERGREEN_LUT_10BIT_BYPASS_EN            (1 << 8)
+                        *(UINT32*)(gGraphics[j].Mmio + 0x6800) = 1; //EVERGREEN_GRPH_ENABLE
+                        *(UINT32*)(gGraphics[j].Mmio + 0x6EF8) = 0; //EVERGREEN_MASTER_UPDATE_MODE
+     //                   *(UINT32*)(gGraphics[j].Mmio + R600_BIOS_0_SCRATCH) = 0x00810000;
                         DBG("Device %d deinited\n", j);
                       }
                     }
                   }
-*/
+
                   break;
 
                 case 0x8086:
@@ -7109,7 +7138,7 @@ SetFSInjection (
   }
 
   // check if blocking of caches is needed
-  if (OSFLAG_ISSET(Entry->Flags, OSFLAG_NOCACHES)) {
+  if (OSFLAG_ISSET(Entry->Flags, OSFLAG_NOCACHES) || ((StrStr(Entry->LoadOptions, L"-f") != NULL))) {
     MsgLog ("Blocking kext caches\n");
     //  BlockCaches = TRUE;
     // add caches to blacklist
@@ -7119,13 +7148,51 @@ SetFSInjection (
       return EFI_NOT_STARTED;
     }
 
-    FSInject->AddStringToList(Blacklist, L"\\System\\Library\\Caches\\com.apple.kext.caches\\Startup\\kernelcache");
+    /*
+     From 10.7 to 10.9, status of directly restoring ESD files or update from Appstore cannot block kernel cache. because there are boot.efi and kernelcache file without kernel file.
+     After macOS installed, boot.efi can call kernel file from S/L/Kernels.
+     For this reason, long time ago, chameleon's user restored Base System.dmg to made USB installer and added kernel file in root and custom kexts in S/L/E. then used "-f" option.
+     From 10.10+, boot.efi call only prelinkedkernel file without kernel file. we can never block only kernelcache.
+     The use of these block caches is meaningless in modern macOS. Unlike the old days, we do not have to do the tedious task of putting the files needed for booting into the S/L/E.
+     by Sherlocks, 2017.11
+     */
+
+    // Caution! Do not add this list. If add this list, will see "Kernel cache load error (0xe)". This is just a guideline.
+    // === Installed ===
+    // 10.10+
+    //FSInject->AddStringToList(Blacklist, L"\\System\\Library\\PrelinkedKernels\\prelinkedkernel");
+    // === Recovery ===
+    // 10.7+
+    //FSInject->AddStringToList(Blacklist, L"\\com.apple.recovery.boot\\kernelcache");
+    // 10.10+
+    //FSInject->AddStringToList(Blacklist, L"\\com.apple.recovery.boot\\prelinkedkernel");
+    // === ESD/Appstore/createinstallmedia/startosinstall ===
+    // 10.7
+    //FSInject->AddStringToList(Blacklist, L"\\kernelcache");
+    //FSInject->AddStringToList(Blacklist, L"\\Mac OS X Install Data\\kernelcache");
+    // 10.8/10.9
+    //FSInject->AddStringToList(Blacklist, L"\\OS X Install Data\\kernelcache");
+    // 10.10
+    //FSInject->AddStringToList(Blacklist, L"\\.IABootFiles\\kernelcache");
+    // 10.11+
+    //FSInject->AddStringToList(Blacklist, L"\\.IABootFiles\\prelinkedkernel");
+    // 10.12
+    //FSInject->AddStringToList(Blacklist, L"\\macOS Install Data\\prelinkedkernel");
+    // 10.13+
+    //FSInject->AddStringToList(Blacklist, L"\\macOS Install Data\\Locked Files\\Boot Files\\prelinkedkernel");
+    // === Fusion Drive ===
+    // 10.11
+    //FSInject->AddStringToList(Blacklist, L"\\com.apple.boot.S\\System\\Library\\PrelinkedKernels\\prelinkedkernel");
+    // 10.12+
+    //FSInject->AddStringToList(Blacklist, L"\\com.apple.boot.R\\prelinkedkernel");
+
+
+    // Block Caches list
+    // 10.6
     FSInject->AddStringToList(Blacklist, L"\\System\\Library\\Caches\\com.apple.kext.caches\\Startup\\Extensions.mkext");
     FSInject->AddStringToList(Blacklist, L"\\System\\Library\\Extensions.mkext");
-  //  FSInject->AddStringToList(Blacklist, L"\\System\\Library\\PrelinkedKernels\\prelinkedkernel");
-    FSInject->AddStringToList(Blacklist, L"\\com.apple.recovery.boot\\kernelcache");
-    FSInject->AddStringToList(Blacklist, L"\\com.apple.recovery.boot\\Extensions.mkext");
-    FSInject->AddStringToList(Blacklist, L"\\.IABootFiles\\kernelcache");
+    // 10.6/10.7/10.8/10.9
+    FSInject->AddStringToList(Blacklist, L"\\System\\Library\\Caches\\com.apple.kext.caches\\Startup\\kernelcache");
 
     if (gSettings.BlockKexts[0] != L'\0') {
       FSInject->AddStringToList(Blacklist, PoolPrint (L"\\System\\Library\\Extensions\\%s", gSettings.BlockKexts));
